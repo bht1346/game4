@@ -1,0 +1,1641 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>恶魔轮盘赌 · 数学老师特供版</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background: #0a0a0a;
+            color: #ddd;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            max-width: 820px;
+            margin: 0 auto;
+            font-size: 16px;
+            line-height: 1.6;
+            user-select: none;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* 趣味人机验证 */
+        #captcha-screen {
+            width: 100%;
+            text-align: center;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 14px;
+            padding: 36px 24px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+        }
+        #captcha-screen h1 {
+            color: #ffcc00;
+            font-size: 28px;
+            margin-bottom: 8px;
+            letter-spacing: 3px;
+        }
+        #captcha-screen .captcha-subtitle {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 22px;
+        }
+        .captcha-box {
+            max-width: 520px;
+            margin: 0 auto;
+            background: #0a0a0a;
+            border: 1px dashed #555;
+            border-radius: 10px;
+            padding: 18px;
+            text-align: left;
+        }
+        .captcha-question {
+            color: #ddd;
+            margin-bottom: 12px;
+        }
+        .captcha-step {
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid #222;
+        }
+        .slider-track {
+            position: relative;
+            height: 46px;
+            background: linear-gradient(90deg, #151515, #202020);
+            border: 1px solid #444;
+            border-radius: 24px;
+            overflow: hidden;
+            touch-action: none;
+        }
+        .slider-fill {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 0;
+            background: linear-gradient(90deg, rgba(255,204,0,.18), rgba(255,204,0,.36));
+        }
+        .slider-target {
+            position: absolute;
+            top: 4px;
+            left: 72%;
+            width: 4px;
+            height: 36px;
+            border-radius: 4px;
+            background: #ffcc00;
+            box-shadow: 0 0 14px rgba(255, 204, 0, .75);
+            transform: translateX(-50%);
+            z-index: 1;
+        }
+        .slider-target::before {
+            content: "目标";
+            position: absolute;
+            left: 50%;
+            bottom: 39px;
+            transform: translateX(-50%);
+            color: #ffcc00;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+        .slider-hint {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #777;
+            font-size: 14px;
+            pointer-events: none;
+        }
+        .slider-thumb {
+            position: absolute;
+            left: 2px;
+            top: 2px;
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            border: 1px solid #777;
+            background: #2a2a2a;
+            color: #ffcc00;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: grab;
+            z-index: 2;
+            transition: background .15s, border-color .15s;
+        }
+        .slider-thumb.resetting {
+            transition: left .22s ease, background .15s, border-color .15s;
+        }
+        .slider-thumb:active {
+            cursor: grabbing;
+        }
+        .slider-track.done {
+            border-color: #44aa44;
+        }
+        .slider-track.done .slider-thumb {
+            background: #113311;
+            border-color: #55ff55;
+            color: #77ff77;
+        }
+        .slider-track.fail {
+            border-color: #aa4444;
+            animation: shake .22s linear;
+        }
+        .slider-track.fail .slider-thumb {
+            background: #331111;
+            border-color: #ff5555;
+            color: #ff7777;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-4px); }
+            50% { transform: translateX(4px); }
+            75% { transform: translateX(-2px); }
+        }
+        .shape-options {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .shape-option {
+            height: 82px;
+            text-align: center;
+            padding: 10px;
+            border: 1px solid #444;
+            border-radius: 8px;
+            background: #181818;
+            cursor: pointer;
+            transition: all .15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .shape-option:hover,
+        .shape-option.selected {
+            border-color: #ffcc00;
+            background: #221d0d;
+        }
+        .shape {
+            display: block;
+            background: #88ccff;
+            box-shadow: 0 0 12px rgba(136, 204, 255, .25);
+        }
+        .shape.circle {
+            border-radius: 50%;
+        }
+        .shape.triangle {
+            width: 0;
+            height: 0;
+            background: transparent;
+            box-shadow: none;
+            border-left: 22px solid transparent;
+            border-right: 22px solid transparent;
+            border-bottom: 40px solid #88ccff;
+        }
+        .shape.big-square {
+            width: 48px;
+            height: 48px;
+        }
+        .shape.mid-circle {
+            width: 38px;
+            height: 38px;
+        }
+        .shape.small-square {
+            width: 22px;
+            height: 22px;
+            background: #ffcc00;
+        }
+        .shape.long-rect {
+            width: 54px;
+            height: 28px;
+        }
+        #captcha-log {
+            min-height: 54px;
+            color: #88ccff;
+            font-size: 13px;
+            white-space: pre-wrap;
+            margin-top: 12px;
+        }
+        /* 启动界面 */
+        #start-screen {
+            display: none;
+            width: 100%;
+            text-align: center;
+            padding: 60px 20px;
+        }
+        #start-screen h1 {
+            color: #ffcc00;
+            font-size: 32px;
+            margin-bottom: 10px;
+            letter-spacing: 4px;
+        }
+        #start-screen .subtitle {
+            color: #888;
+            margin-bottom: 60px;
+            font-size: 14px;
+        }
+        .mode-btn {
+            display: block;
+            width: 280px;
+            margin: 20px auto;
+            padding: 16px 30px;
+            background: #1a1a1a;
+            border: 1px solid #555;
+            color: #eee;
+            font-family: inherit;
+            font-size: 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-btn:hover {
+            background: #2a2a2a;
+            border-color: #ffcc00;
+            transform: scale(1.03);
+        }
+        .mode-btn.danger {
+            border-color: #aa4444;
+            color: #ff7777;
+        }
+        .mode-btn.danger:hover {
+            background: #331111;
+            border-color: #ff5555;
+        }
+        .mode-btn.online {
+            border-color: #44aaff;
+            color: #88ccff;
+        }
+        .mode-btn.online:hover {
+            background: #112233;
+            border-color: #55bbff;
+        }
+
+        /* 报错界面 */
+        #error-screen {
+            display: none;
+            width: 100%;
+            background: #000;
+            padding: 20px;
+            border-radius: 8px;
+            height: 500px;
+            overflow-y: auto;
+            font-size: 14px;
+        }
+        .error-line {
+            color: #ff4444;
+            margin-bottom: 4px;
+            white-space: pre-wrap;
+        }
+        .error-line .file {
+            color: #88ccff;
+        }
+
+        /* 重启进度界面 */
+        #reboot-screen {
+            display: none;
+            width: 100%;
+            background: #000;
+            padding: 40px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        #reboot-screen .title {
+            color: #00ff00;
+            margin-bottom: 20px;
+        }
+        #progress-bar {
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            white-space: pre;
+            margin-bottom: 10px;
+        }
+        #progress-text {
+            color: #aaa;
+            font-size: 14px;
+        }
+
+        /* 游戏主界面 */
+        #game {
+            display: none;
+            width: 100%;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+        }
+        #status {
+            background: #0d0d0d;
+            padding: 14px 18px;
+            border-radius: 8px;
+            border-left: 4px solid #ffcc00;
+            margin-bottom: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-size: 17px;
+            min-height: 100px;
+        }
+        #log {
+            background: #0a0a0a;
+            padding: 12px 16px;
+            border-radius: 8px;
+            height: 220px;
+            overflow-y: auto;
+            margin-bottom: 14px;
+            border: 1px solid #2a2a2a;
+            font-size: 15px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            scroll-behavior: smooth;
+        }
+        #log::-webkit-scrollbar {
+            width: 6px;
+        }
+        #log::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        #log::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 4px;
+        }
+        .btn-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 6px;
+        }
+        button {
+            background: #252525;
+            color: #eee;
+            border: 1px solid #555;
+            padding: 10px 22px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 16px;
+            transition: all 0.15s;
+            flex: 0 1 auto;
+            min-width: 80px;
+        }
+        button:hover:not(:disabled) {
+            background: #3a3a3a;
+            border-color: #aaa;
+            transform: scale(1.02);
+        }
+        button:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            transform: none;
+        }
+        button.danger {
+            border-color: #aa4444;
+            color: #ff7777;
+        }
+        button.danger:hover:not(:disabled) {
+            background: #441111;
+            border-color: #ff5555;
+        }
+        button.success {
+            border-color: #44aa44;
+            color: #77ff77;
+        }
+        button.success:hover:not(:disabled) {
+            background: #113311;
+            border-color: #55ff55;
+        }
+        button.warn {
+            border-color: #ccaa44;
+            color: #ffdd77;
+        }
+        button.warn:hover:not(:disabled) {
+            background: #332a11;
+            border-color: #ffdd55;
+        }
+        .highlight {
+            color: #ffcc00;
+        }
+        .danger-text {
+            color: #ff4444;
+        }
+        .success-text {
+            color: #44ff44;
+        }
+        .info-text {
+            color: #88ccff;
+        }
+        #item-submenu {
+            display: none;
+            background: #1f1f1f;
+            padding: 10px 14px;
+            border-radius: 6px;
+            border: 1px dashed #666;
+            margin-top: 8px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        #item-submenu.show {
+            display: flex;
+        }
+        .item-btn {
+            background: #2a2a2a;
+            border: 1px solid #666;
+            padding: 6px 14px;
+            border-radius: 4px;
+            color: #ddd;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .item-btn:hover:not(:disabled) {
+            background: #3d3d3d;
+            border-color: #aaa;
+        }
+        .item-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        /* 结局界面 */
+        #ending-screen {
+            display: none;
+            width: 100%;
+            text-align: center;
+            padding: 60px 20px;
+        }
+        #ending-screen h2 {
+            color: #ffcc00;
+            margin-bottom: 20px;
+        }
+        #ending-screen p {
+            color: #ddd;
+            margin-bottom: 40px;
+            line-height: 1.8;
+        }
+    </style>
+</head>
+<body>
+
+<!-- 趣味人机验证 -->
+<div id="captcha-screen">
+    <h1>人机验证</h1>
+    <div class="captcha-subtitle">—— 仅供娱乐，不是真的安全验证 ——</div>
+    <div class="captcha-box">
+        <div class="captcha-question">
+            请完成安全检查：滑动滑块，并选择最小图形。
+        </div>
+        <div class="captcha-step">
+            <div class="captcha-question">第一步：请按住滑块拖到指定位置</div>
+            <div class="slider-track" id="captcha-slider">
+                <div class="slider-fill" id="slider-fill"></div>
+                <div class="slider-target" id="slider-target"></div>
+                <div class="slider-hint" id="slider-hint">请拖到黄色目标线附近</div>
+                <div class="slider-thumb" id="slider-thumb">➜</div>
+            </div>
+        </div>
+        <div class="captcha-step">
+            <div class="captcha-question">第二步：请选择最小图形</div>
+            <div class="shape-options" id="shape-options"></div>
+        </div>
+        <button class="mode-btn" id="captcha-btn" onclick="verifyHuman()">提交验证</button>
+        <div id="captcha-log">等待验证：请先拖动滑块。</div>
+    </div>
+</div>
+
+<!-- 启动界面 -->
+<div id="start-screen">
+    <h1>恶魔轮盘赌</h1>
+    <div class="subtitle">—— 数学老师特供版 ——</div>
+    <button class="mode-btn" onclick="startNormalMode()">普通模式</button>
+    <button class="mode-btn danger" onclick="startInfiniteMode()">无限模式</button>
+    <button class="mode-btn online" onclick="startOnlineMode()">联机模式</button>
+    <div style="margin-top: 60px; color: #666; font-size: 12px;">
+        提示：约分后显示 1/2 时，下一发必定是实弹
+    </div>
+</div>
+
+<!-- 报错界面 -->
+<div id="error-screen"></div>
+
+<!-- 重启进度界面 -->
+<div id="reboot-screen">
+    <div class="title">[ 系统异常，正在强制重启... ]</div>
+    <div id="progress-bar">[>         ] 0%</div>
+    <div id="progress-text">正在修复约分逻辑溢出...</div>
+</div>
+
+<!-- 游戏主界面 -->
+<div id="game">
+    <div id="status">加载中...</div>
+    <div id="log">欢迎来到恶魔轮盘赌 · 数学老师特供版</div>
+    <div id="item-submenu"></div>
+    <div class="btn-group" id="main-buttons"></div>
+</div>
+
+<!-- 结局界面 -->
+<div id="ending-screen">
+    <h2>🏃 成功逃脱</h2>
+    <p>
+        你趁乱冲出办公室，撞见了路过的校长。<br>
+        他脸色惨白塞给你一张100万的银行卡，求你赶紧走，再也别回学校。<br>
+        你揣着钱翻出校门，从此过上了没有数学题、不用约分的幸福生活。
+    </p>
+    <button class="mode-btn" onclick="backToModeSelect()">返回模式选择</button>
+</div>
+
+<script>
+    // ===================================================================
+    //  全局游戏状态
+    // ===================================================================
+    const G = {
+        round: 0,
+        playerHp: 0,
+        teacherHp: 0,
+        maxHp: 0,
+        bullets: [],
+        bulletIndex: 0,
+        totalBullets: 0,
+        shotsFired: 0,
+        turn: 'player',
+        roundOver: false,
+        gameOver: false,
+        isInfiniteMode: false, // 是否无限模式
+        // 普通模式道具（每局各1次）
+        playerItemsUsed: [false, false, false],
+        teacherItemsUsed: [false, false, false],
+        // 无限模式道具（数量数组，4种：辣条、饮料、手机、匕首）
+        playerItems: [0, 0, 0, 0],
+        teacherItems: [0, 0, 0, 0],
+        // 伤害倍率（匕首效果）
+        playerDmgMult: 1,
+        teacherDmgMult: 1,
+        // 下局先手锁定
+        nextFirst: 0,
+        waitingForAction: false,
+    };
+
+    const ITEM_NAMES = ['辣条', '饮料', '手机', '军用匕首'];
+    const ITEM_DESC = ['(+1血)', '(移除顶部子弹)', '(锁下局先手)', '(伤害翻倍)'];
+    let captchaPassed = false;
+    let sliderPassed = false;
+    let shapePassed = false;
+
+    // DOM引用
+    const startScreen = document.getElementById('start-screen');
+    const errorScreen = document.getElementById('error-screen');
+    const rebootScreen = document.getElementById('reboot-screen');
+    const gameDiv = document.getElementById('game');
+    const endingScreen = document.getElementById('ending-screen');
+    const statusDiv = document.getElementById('status');
+    const logDiv = document.getElementById('log');
+    const btnGroup = document.getElementById('main-buttons');
+    const itemMenu = document.getElementById('item-submenu');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+
+    // ===================================================================
+    //  工具函数
+    // ===================================================================
+    function rand(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+    function gcd(a, b) {
+        a = Math.abs(a);
+        b = Math.abs(b);
+        while (b) {
+            [a, b] = [b, a % b];
+        }
+        return a;
+    }
+    function formatFraction(num, den) {
+        if (den === 0) return '0/0';
+        const g = gcd(num, den);
+        return `${num/g}/${den/g}`;
+    }
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    function getRemainBulletCount() {
+        const remainBullets = G.bullets.slice(G.bulletIndex);
+        let real = 0, blank = 0;
+        remainBullets.forEach(t => {
+            if(t === 'real') real++;
+            else blank++;
+        });
+        return {real, blank, total: real + blank};
+    }
+
+    // ===================================================================
+    //  日志
+    // ===================================================================
+    function log(msg, cls = '') {
+        const span = document.createElement('span');
+        span.textContent = msg + '\n';
+        if (cls) span.className = cls;
+        logDiv.appendChild(span);
+        logDiv.scrollTop = logDiv.scrollHeight;
+        while (logDiv.children.length > 50) {
+            logDiv.removeChild(logDiv.firstChild);
+        }
+    }
+    function clearLog() {
+        logDiv.innerHTML = '';
+    }
+
+    // ===================================================================
+    //  弹巢初始化
+    // ===================================================================
+    function initBullets() {
+        G.totalBullets = rand(4, 18);
+        const realCount = rand(1, G.totalBullets - 1);
+        const blankCount = G.totalBullets - realCount;
+        const arr = [];
+        for (let i = 0; i < realCount; i++) arr.push('real');
+        for (let i = 0; i < blankCount; i++) arr.push('blank');
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = rand(0, i);
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        G.bullets = arr;
+        G.bulletIndex = 0;
+        G.shotsFired = 0;
+    }
+
+    // ===================================================================
+    //  血量与道具初始化
+    // ===================================================================
+    function resetHp() {
+        if (G.isInfiniteMode) {
+            // 无限模式：1局3血，2局5血，3局及以后12血
+            if (G.round === 1) G.maxHp = 3;
+            else if (G.round === 2) G.maxHp = 5;
+            else G.maxHp = 12;
+        } else {
+            const map = { 1: 3, 2: 5, 3: 8 };
+            G.maxHp = map[G.round] || 3;
+        }
+        G.playerHp = G.maxHp;
+        G.teacherHp = G.maxHp;
+    }
+
+    function resetItems() {
+        // 重置伤害倍率
+        G.playerDmgMult = 1;
+        G.teacherDmgMult = 1;
+
+        if (G.isInfiniteMode) {
+            // 无限模式：随机4个道具，可重复
+            G.playerItems = [0, 0, 0, 0];
+            G.teacherItems = [0, 0, 0, 0];
+            for (let i = 0; i < 4; i++) {
+                G.playerItems[rand(0, 3)]++;
+                G.teacherItems[rand(0, 3)]++;
+            }
+        } else {
+            // 普通模式：3个道具各1次
+            G.playerItemsUsed = [false, false, false];
+            G.teacherItemsUsed = [false, false, false];
+        }
+    }
+
+    // ===================================================================
+    //  开枪核心逻辑
+    // ===================================================================
+    function fireShot() {
+        if (G.bulletIndex >= G.totalBullets) {
+            log('弹巢已空，重新上弹...', 'info-text');
+            initBullets();
+            // 换弹重置伤害倍率
+            G.playerDmgMult = 1;
+            G.teacherDmgMult = 1;
+            return 'reload';
+        }
+
+        let bullet = G.bullets[G.bulletIndex];
+        // 约分陷阱：1/2强制实弹
+        if (G.totalBullets === 2 * G.shotsFired) {
+            bullet = 'real';
+        }
+
+        G.bulletIndex++;
+        G.shotsFired++;
+        return bullet;
+    }
+
+    // ===================================================================
+    //  执行射击（含匕首伤害倍率）
+    // ===================================================================
+    function takeShot(target) {
+        const result = fireShot();
+        if (result === 'reload') {
+            return 'blank';
+        }
+        if (result === 'blank') {
+            log('空弹');
+            return 'blank';
+        } else {
+            // 计算伤害
+            let dmg = 1;
+            if (G.turn === 'player') {
+                dmg = Math.floor(dmg * G.playerDmgMult);
+                G.playerDmgMult = 1; // 命中后重置倍率
+            } else {
+                dmg = Math.floor(dmg * G.teacherDmgMult);
+                G.teacherDmgMult = 1;
+            }
+
+            // 扣血
+            if (target === 'self') {
+                if(G.turn === 'player') G.playerHp -= dmg;
+                else G.teacherHp -= dmg;
+                log(`${G.turn === 'player' ? '你' : '老师'}中弹，-${dmg}血`, 'danger-text');
+            } else {
+                if(G.turn === 'player') G.teacherHp -= dmg;
+                else G.playerHp -= dmg;
+                const hitName = G.turn === 'player' ? '老师' : '你';
+                log(`${hitName}中弹，-${dmg}血`, G.turn === 'player' ? 'success-text' : 'danger-text');
+            }
+
+            if (G.playerHp <= 0 || G.teacherHp <= 0) {
+                return 'dead';
+            }
+            return 'hit';
+        }
+    }
+
+    // ===================================================================
+    //  渲染状态
+    // ===================================================================
+    function render() {
+        // 局数显示：无限模式固定显示-1
+        const roundDisplay = G.isInfiniteMode ? -1 : G.round;
+        const roundText = `【第${roundDisplay}局】`;
+        const hpText = `你：${G.playerHp}血  老师：${G.teacherHp}血`;
+        const frac = formatFraction(G.shotsFired, G.totalBullets);
+        const fracText = `分数：${frac}`;
+        const bulletStat = getRemainBulletCount();
+        const bulletText = `剩余子弹：实弹${bulletStat.real}发 / 空弹${bulletStat.blank}发（合计${bulletStat.total}）`;
+
+        // 道具显示
+        let itemsText = '';
+        if (G.isInfiniteMode || G.round >= 2) {
+            const avail = [];
+            if (G.isInfiniteMode) {
+                for (let i = 0; i < 4; i++) {
+                    if (G.playerItems[i] > 0) {
+                        avail.push(`${ITEM_NAMES[i]} x${G.playerItems[i]}`);
+                    }
+                }
+            } else {
+                const used = G.playerItemsUsed;
+                for (let i = 0; i < 3; i++) {
+                    if (!used[i]) avail.push(ITEM_NAMES[i]);
+                }
+            }
+            itemsText = `道具：${avail.length ? avail.join('  ') : '无'}`;
+        }
+
+        // 回合显示
+        let turnText = '';
+        if (G.gameOver) {
+            turnText = '【游戏结束】';
+        } else if (G.roundOver) {
+            turnText = '【本局结束】';
+        } else {
+            turnText = G.turn === 'player' ? '【你的回合】' : '【老师回合】';
+        }
+
+        statusDiv.innerHTML = `${roundText} ${hpText}\n${fracText} | ${bulletText}${itemsText ? '\n'+itemsText : ''}\n${turnText}`;
+    }
+
+    // ===================================================================
+    //  更新按钮
+    // ===================================================================
+    function updateButtons() {
+        btnGroup.innerHTML = '';
+        itemMenu.classList.remove('show');
+        itemMenu.innerHTML = '';
+        
+        if (G.gameOver) {
+            const btn = document.createElement('button');
+            btn.textContent = '返回模式选择';
+            btn.onclick = () => backToModeSelect();
+            btnGroup.appendChild(btn);
+            return;
+        }
+        
+        if (G.roundOver) {
+            // 普通模式第三局结束 / 无限模式胜利
+            if (!G.isInfiniteMode && G.round >= 3) {
+                const btn = document.createElement('button');
+                btn.textContent = '查看结局';
+                btn.onclick = () => showFinalEnding();
+                btnGroup.appendChild(btn);
+                return;
+            }
+
+            const btnNext = document.createElement('button');
+            btnNext.textContent = '进入下一局';
+            btnNext.className = 'success';
+            btnNext.onclick = () => nextRound();
+            btnGroup.appendChild(btnNext);
+
+            // 无限模式第3局及以后，显示退出按钮
+            if (G.isInfiniteMode && G.round >= 3) {
+                const btnExit = document.createElement('button');
+                btnExit.textContent = '退出游戏';
+                btnExit.className = 'warn';
+                btnExit.onclick = () => showEscapeEnding();
+                btnGroup.appendChild(btnExit);
+            }
+            return;
+        }
+        
+        if (G.turn !== 'player') {
+            const btn = document.createElement('button');
+            btn.textContent = '等待老师操作...';
+            btn.disabled = true;
+            btnGroup.appendChild(btn);
+            return;
+        }
+        
+        // 玩家操作按钮
+        const btnSelf = document.createElement('button');
+        btnSelf.textContent = '🔫 打自己';
+        btnSelf.className = 'danger';
+        btnSelf.onclick = () => playerAction('self');
+        btnGroup.appendChild(btnSelf);
+        
+        const btnEnemy = document.createElement('button');
+        btnEnemy.textContent = '🔫 打老师';
+        btnEnemy.className = 'success';
+        btnEnemy.onclick = () => playerAction('enemy');
+        btnGroup.appendChild(btnEnemy);
+        
+        // 道具按钮
+        const hasItem = G.isInfiniteMode 
+            ? G.playerItems.some(n => n > 0)
+            : (G.round >= 2 && G.playerItemsUsed.some(u => !u));
+        if (hasItem) {
+            const btnItem = document.createElement('button');
+            btnItem.textContent = '🎒 道具';
+            btnItem.className = 'warn';
+            btnItem.onclick = () => toggleItemMenu();
+            btnGroup.appendChild(btnItem);
+        }
+    }
+
+    // ===================================================================
+    //  道具菜单与使用
+    // ===================================================================
+    function toggleItemMenu() {
+        if (itemMenu.classList.contains('show')) {
+            itemMenu.classList.remove('show');
+            return;
+        }
+        itemMenu.innerHTML = '';
+
+        if (G.isInfiniteMode) {
+            // 无限模式：4种道具，显示数量
+            for (let i = 0; i < 4; i++) {
+                if (G.playerItems[i] <= 0) continue;
+                const btn = document.createElement('button');
+                btn.className = 'item-btn';
+                btn.textContent = `${ITEM_NAMES[i]} x${G.playerItems[i]} ${ITEM_DESC[i]}`;
+                btn.onclick = () => useItemInfinite(i);
+                itemMenu.appendChild(btn);
+            }
+        } else {
+            // 普通模式：3种道具
+            for (let i = 0; i < 3; i++) {
+                if (G.playerItemsUsed[i]) continue;
+                const btn = document.createElement('button');
+                btn.className = 'item-btn';
+                btn.textContent = `${ITEM_NAMES[i]} ${ITEM_DESC[i]}`;
+                btn.onclick = () => useItemNormal(i);
+                itemMenu.appendChild(btn);
+            }
+        }
+
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'item-btn';
+        closeBtn.textContent = '✕ 取消';
+        closeBtn.onclick = () => itemMenu.classList.remove('show');
+        itemMenu.appendChild(closeBtn);
+        itemMenu.classList.add('show');
+    }
+
+    // 普通模式道具
+    function useItemNormal(index) {
+        if (G.turn !== 'player' || G.roundOver || G.gameOver) return;
+        itemMenu.classList.remove('show');
+        if (G.playerItemsUsed[index]) return;
+
+        switch (index) {
+            case 0: // 辣条
+                if (G.playerHp >= G.maxHp) {
+                    log('你已经是满血了', 'info-text');
+                    return;
+                }
+                G.playerItemsUsed[0] = true;
+                G.playerHp++;
+                log('你吃了辣条，+1血', 'success-text');
+                break;
+            case 1: // 饮料
+                if (G.bulletIndex >= G.totalBullets) {
+                    log('弹巢已空，无法移除', 'info-text');
+                    return;
+                }
+                G.playerItemsUsed[1] = true;
+                G.bulletIndex++;
+                log('你喝了饮料，移除顶部一发子弹', 'info-text');
+                break;
+            case 2: // 手机
+                G.playerItemsUsed[2] = true;
+                G.nextFirst = 1;
+                log('你用了小手机，下局你先手', 'info-text');
+                break;
+        }
+        render();
+        updateButtons();
+    }
+
+    // 无限模式道具
+    function useItemInfinite(index) {
+        if (G.turn !== 'player' || G.roundOver || G.gameOver) return;
+        itemMenu.classList.remove('show');
+        if (G.playerItems[index] <= 0) return;
+
+        switch (index) {
+            case 0: // 辣条
+                if (G.playerHp >= G.maxHp) {
+                    log('你已经是满血了', 'info-text');
+                    return;
+                }
+                G.playerItems[0]--;
+                G.playerHp++;
+                log('你吃了辣条，+1血', 'success-text');
+                break;
+            case 1: // 饮料
+                if (G.bulletIndex >= G.totalBullets) {
+                    log('弹巢已空，无法移除', 'info-text');
+                    return;
+                }
+                G.playerItems[1]--;
+                G.bulletIndex++;
+                log('你喝了饮料，移除顶部一发子弹', 'info-text');
+                break;
+            case 2: // 手机
+                G.playerItems[2]--;
+                G.nextFirst = 1;
+                log('你用了小手机，下局你先手', 'info-text');
+                break;
+            case 3: // 军用匕首
+                G.playerItems[3]--;
+                G.playerDmgMult *= 2;
+                log('你装上了军用匕首，下一发实弹伤害翻倍', 'danger-text');
+                break;
+        }
+        render();
+        updateButtons();
+    }
+
+    // ===================================================================
+    //  玩家行动
+    // ===================================================================
+    function playerAction(target) {
+        if (G.turn !== 'player' || G.roundOver || G.gameOver) return;
+        if (G.waitingForAction) return;
+        G.waitingForAction = true;
+        itemMenu.classList.remove('show');
+        
+        const who = target === 'self' ? '自己' : '老师';
+        log(`你朝${who}开枪`, 'info-text');
+        const result = takeShot(target);
+        render();
+        
+        if (result === 'dead') {
+            if (G.playerHp <= 0) {
+                G.gameOver = true;
+                G.roundOver = true;
+                log('💀 你中弹身亡，游戏彻底结束！', 'danger-text');
+            } else {
+                G.roundOver = true;
+                log('🎉 老师被击倒！你赢了这一局！', 'success-text');
+            }
+            G.waitingForAction = false;
+            render();
+            updateButtons();
+            return;
+        } else if (result === 'hit') {
+            G.turn = 'teacher';
+            log('换手，轮到老师', 'info-text');
+            render();
+            updateButtons();
+            G.waitingForAction = false;
+            setTimeout(() => teacherTurn(), 400);
+            return;
+        } else {
+            // 空弹规则：打自己继续，打对方换手
+            if (target === 'self') {
+                log('空弹，继续你的回合', 'info-text');
+                G.waitingForAction = false;
+            } else {
+                log('空弹，换手到老师', 'info-text');
+                G.turn = 'teacher';
+                G.waitingForAction = false;
+                setTimeout(() => teacherTurn(), 400);
+            }
+            render();
+            updateButtons();
+            return;
+        }
+    }
+
+    // ===================================================================
+    //  老师AI回合
+    // ===================================================================
+    async function teacherTurn() {
+        if (G.roundOver || G.gameOver) return;
+        if (G.turn !== 'teacher') return;
+        G.waitingForAction = true;
+        await sleep(500);
+        
+        if (G.roundOver || G.gameOver) {
+            G.waitingForAction = false;
+            return;
+        }
+
+        // 老师道具逻辑
+        if (G.isInfiniteMode) {
+            // 无限模式AI道具
+            // 回血
+            if (G.teacherItems[0] > 0 && G.teacherHp < G.maxHp * 0.4) {
+                G.teacherItems[0]--;
+                G.teacherHp++;
+                log('老师吃了泡面，+1血', 'danger-text');
+                render();
+                await sleep(300);
+                if (G.roundOver || G.gameOver) { G.waitingForAction = false; return; }
+                teacherTurn();
+                return;
+            }
+            // 移除顶部
+            if (G.teacherItems[1] > 0 && G.bulletIndex < G.totalBullets) {
+                const fracVal = G.shotsFired / G.totalBullets;
+                if (fracVal > 0.5) {
+                    G.teacherItems[1]--;
+                    G.bulletIndex++;
+                    log('老师扔粉笔头，移除顶部一发子弹', 'info-text');
+                    render();
+                    await sleep(300);
+                    if (G.roundOver || G.gameOver) { G.waitingForAction = false; return; }
+                    teacherTurn();
+                    return;
+                }
+            }
+            // 锁先手
+            if (G.teacherItems[2] > 0 && G.shotsFired > G.totalBullets * 0.7) {
+                G.teacherItems[2]--;
+                G.nextFirst = 2;
+                log('老师占了自习课，下局老师先手', 'info-text');
+                render();
+                await sleep(300);
+                if (G.roundOver || G.gameOver) { G.waitingForAction = false; return; }
+                teacherTurn();
+                return;
+            }
+            // 匕首：血量低且玩家血少时使用
+            if (G.teacherItems[3] > 0 && G.teacherHp <= 3 && G.playerHp <= 4) {
+                G.teacherItems[3]--;
+                G.teacherDmgMult *= 2;
+                log('老师掏出了戒尺，下一发伤害翻倍！', 'danger-text');
+                render();
+                await sleep(300);
+                if (G.roundOver || G.gameOver) { G.waitingForAction = false; return; }
+                teacherTurn();
+                return;
+            }
+        } else {
+            // 普通模式AI道具
+            if (G.round >= 2) {
+                const used = G.teacherItemsUsed;
+                if (!used[1] && G.teacherHp < G.maxHp / 2) {
+                    used[1] = true;
+                    G.teacherHp++;
+                    log('老师刷视频，+1血', 'danger-text');
+                    render();
+                    await sleep(300);
+                    if (G.roundOver || G.gameOver) { G.waitingForAction = false; return; }
+                    teacherTurn();
+                    return;
+                }
+                if (!used[2] && G.bulletIndex < G.totalBullets) {
+                    const fracVal = G.shotsFired / G.totalBullets;
+                    if (fracVal > 0.5) {
+                        used[2] = true;
+                        G.bulletIndex++;
+                        log('老师扔粉笔，移除顶部一发子弹', 'info-text');
+                        render();
+                        await sleep(300);
+                        if (G.roundOver || G.gameOver) { G.waitingForAction = false; return; }
+                        teacherTurn();
+                        return;
+                    }
+                }
+                if (!used[0] && G.shotsFired > G.totalBullets * 0.7) {
+                    used[0] = true;
+                    G.nextFirst = 2;
+                    log('老师用自习课，下局老师先手', 'info-text');
+                    render();
+                    await sleep(300);
+                    if (G.roundOver || G.gameOver) { G.waitingForAction = false; return; }
+                    teacherTurn();
+                    return;
+                }
+            }
+        }
+        
+        // 射击决策
+        const fracVal = G.shotsFired / G.totalBullets;
+        let target = 'self';
+        if (fracVal >= 0.5) {
+            target = 'enemy';
+        }
+        if (G.teacherHp === 1 && fracVal < 0.5 && Math.random() < 0.4) {
+            target = 'enemy';
+        }
+        // 有匕首buff时更倾向打玩家
+        if (G.teacherDmgMult > 1 && Math.random() < 0.7) {
+            target = 'enemy';
+        }
+        
+        const targetName = target === 'self' ? '自己' : '你';
+        log(`老师朝${targetName}开枪`, 'info-text');
+        const result = takeShot(target);
+        render();
+        
+        if (result === 'dead') {
+            if (G.playerHp <= 0) {
+                G.gameOver = true;
+                G.roundOver = true;
+                log('💀 你中弹身亡，游戏彻底结束！', 'danger-text');
+            } else {
+                G.roundOver = true;
+                log('🎉 老师被击倒！你赢了这一局！', 'success-text');
+            }
+            G.waitingForAction = false;
+            render();
+            updateButtons();
+            return;
+        } else if (result === 'hit') {
+            G.turn = 'player';
+            log('换手，轮到你了', 'info-text');
+            render();
+            updateButtons();
+            G.waitingForAction = false;
+            return;
+        } else {
+            if (target === 'self') {
+                log('空弹，老师继续', 'info-text');
+                G.waitingForAction = false;
+                setTimeout(() => teacherTurn(), 400);
+            } else {
+                log('空弹，换手到你', 'info-text');
+                G.turn = 'player';
+                G.waitingForAction = false;
+            }
+            render();
+            updateButtons();
+            return;
+        }
+    }
+
+    // ===================================================================
+    //  下一局
+    // ===================================================================
+    function nextRound() {
+        if (!G.roundOver || G.gameOver) return;
+        
+        if (!G.isInfiniteMode && G.round >= 3) {
+            showFinalEnding();
+            return;
+        }
+        
+        G.round++;
+        resetHp();
+        resetItems();
+        initBullets();
+        G.roundOver = false;
+        G.turn = 'player';
+        G.waitingForAction = false;
+        
+        if (G.nextFirst === 2) {
+            G.turn = 'teacher';
+            G.nextFirst = 0;
+        } else if (G.nextFirst === 1) {
+            G.turn = 'player';
+            G.nextFirst = 0;
+        }
+        
+        log(`========== 第${G.round}局开始 ==========`, 'highlight');
+        render();
+        updateButtons();
+        if (G.turn === 'teacher') {
+            setTimeout(() => teacherTurn(), 500);
+        }
+    }
+
+    // ===================================================================
+    //  普通模式结局
+    // ===================================================================
+    function showFinalEnding() {
+        G.gameOver = true;
+        clearLog();
+        log('🏆 你连胜三局，彻底击败了数学老师！', 'success-text');
+        log('（身后传来：开学等着我的！！！）', 'info-text');
+        render();
+        updateButtons();
+    }
+
+    // ===================================================================
+    //  无限模式逃脱结局
+    // ===================================================================
+    function showEscapeEnding() {
+        gameDiv.style.display = 'none';
+        endingScreen.style.display = 'block';
+    }
+
+    function backToModeSelect() {
+        document.getElementById('captcha-screen').style.display = 'none';
+        errorScreen.style.display = 'none';
+        rebootScreen.style.display = 'none';
+        gameDiv.style.display = 'none';
+        endingScreen.style.display = 'none';
+        startScreen.style.display = 'block';
+        itemMenu.classList.remove('show');
+        btnGroup.innerHTML = '';
+        progressBar.textContent = '[>         ] 0%';
+        progressText.textContent = '正在修复约分逻辑溢出...';
+        G.gameOver = false;
+        G.roundOver = false;
+        G.waitingForAction = false;
+    }
+
+    // ===================================================================
+    //  趣味人机验证
+    // ===================================================================
+    function setupSliderCaptcha() {
+        const track = document.getElementById('captcha-slider');
+        const thumb = document.getElementById('slider-thumb');
+        const fill = document.getElementById('slider-fill');
+        const hint = document.getElementById('slider-hint');
+        const target = document.getElementById('slider-target');
+        const logDiv = document.getElementById('captcha-log');
+        let dragging = false;
+        let points = [];
+        const targetRatio = 0.45 + Math.random() * 0.35;
+        target.style.left = `${targetRatio * 100}%`;
+
+        function resetSlider(message) {
+            sliderPassed = false;
+            dragging = false;
+            points = [];
+            track.classList.remove('done');
+            track.classList.add('fail');
+            thumb.textContent = '➜';
+            thumb.classList.add('resetting');
+            thumb.style.left = '2px';
+            fill.style.width = '0';
+            hint.textContent = '请拖到黄色目标线附近';
+            logDiv.textContent = message;
+            setTimeout(() => {
+                track.classList.remove('fail');
+                thumb.classList.remove('resetting');
+            }, 260);
+        }
+
+        function validateHumanTrace(maxX, targetX) {
+            if (points.length < 8) {
+                return '轨迹点过少，请按住滑块正常拖动。';
+            }
+
+            const first = points[0];
+            const last = points[points.length - 1];
+            const duration = last.t - first.t;
+            if (duration < 700) {
+                return '拖动太快，请像真人一样慢一点。';
+            }
+            if (duration > 9000) {
+                return '拖动时间太长，请重新验证。';
+            }
+
+            let distance = 0;
+            let verticalChange = 0;
+            let maxJump = 0;
+            for (let i = 1; i < points.length; i++) {
+                const dx = points[i].x - points[i - 1].x;
+                const dy = points[i].y - points[i - 1].y;
+                const step = Math.hypot(dx, dy);
+                distance += step;
+                verticalChange += Math.abs(dy);
+                maxJump = Math.max(maxJump, Math.abs(dx));
+            }
+
+            const progress = last.x - first.x;
+            const straightness = distance / Math.max(progress, 1);
+            const avgSpeed = progress / duration;
+            const miss = Math.abs(last.x - targetX);
+            const tolerance = Math.max(12, maxX * 0.055);
+
+            if (miss > tolerance) {
+                return '没有停在指定位置，请对准黄色目标线。';
+            }
+            if (avgSpeed > 0.9) {
+                return '平均速度异常，请重新拖动。';
+            }
+            if (maxJump > maxX * 0.45) {
+                return '轨迹跳跃过大，请不要瞬移滑块。';
+            }
+            if (straightness < 1.004 && verticalChange < 2) {
+                return '轨迹过于笔直，请重新拖动。';
+            }
+            return '';
+        }
+
+        function passSlider(targetX) {
+            sliderPassed = true;
+            dragging = false;
+            thumb.style.left = `${targetX}px`;
+            fill.style.width = `${targetX + thumb.offsetWidth / 2}px`;
+            track.classList.remove('fail');
+            track.classList.add('done');
+            hint.textContent = '位置验证通过';
+            thumb.textContent = '✓';
+            logDiv.textContent = shapePassed ? '可以提交验证。' : '滑块已通过，请选择最小图形。';
+        }
+
+        function move(clientX, clientY) {
+            const rect = track.getBoundingClientRect();
+            const max = rect.width - thumb.offsetWidth - 4;
+            const x = Math.max(2, Math.min(clientX - rect.left - thumb.offsetWidth / 2, max + 2));
+            thumb.style.left = `${x}px`;
+            fill.style.width = `${x + thumb.offsetWidth / 2}px`;
+            points.push({ x, y: clientY - rect.top, t: performance.now() });
+        }
+
+        thumb.addEventListener('pointerdown', event => {
+            if (sliderPassed) return;
+            dragging = true;
+            points = [];
+            track.classList.remove('fail');
+            thumb.setPointerCapture(event.pointerId);
+            const rect = track.getBoundingClientRect();
+            points.push({ x: 2, y: event.clientY - rect.top, t: performance.now() });
+            logDiv.textContent = '正在验证滑动轨迹...';
+        });
+
+        thumb.addEventListener('pointermove', event => {
+            if (!dragging || sliderPassed) return;
+            move(event.clientX, event.clientY);
+        });
+
+        thumb.addEventListener('pointerup', () => {
+            if (!dragging || sliderPassed) return;
+            dragging = false;
+            const rect = track.getBoundingClientRect();
+            const max = rect.width - thumb.offsetWidth - 4;
+            const targetX = Math.round(max * targetRatio) + 2;
+            const reason = validateHumanTrace(max, targetX);
+            if (reason) {
+                resetSlider(reason);
+                return;
+            }
+            passSlider(targetX);
+        });
+    }
+
+    function setupShapeCaptcha() {
+        const wrap = document.getElementById('shape-options');
+        const shapes = [
+            { cls: 'big-square', ok: false },
+            { cls: 'circle mid-circle', ok: false },
+            { cls: 'small-square', ok: true },
+            { cls: 'long-rect', ok: false },
+        ];
+
+        for (let i = shapes.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shapes[i], shapes[j]] = [shapes[j], shapes[i]];
+        }
+
+        wrap.innerHTML = '';
+        shapes.forEach(item => {
+            const option = document.createElement('div');
+            option.className = 'shape-option';
+            option.onclick = () => selectShape(option, item.ok);
+            const shape = document.createElement('span');
+            shape.className = `shape ${item.cls}`;
+            option.appendChild(shape);
+            wrap.appendChild(option);
+        });
+    }
+
+    function selectShape(el, isSmallest) {
+        document.querySelectorAll('.shape-option').forEach(item => {
+            item.classList.remove('selected');
+        });
+        el.classList.add('selected');
+        shapePassed = isSmallest;
+        document.getElementById('captcha-log').textContent = isSmallest
+            ? (sliderPassed ? '可以提交验证。' : '图形选择正确，请继续拖动滑块。')
+            : '图形选择错误：请选择最小的图形。';
+    }
+
+    async function verifyHuman() {
+        const captchaLog = document.getElementById('captcha-log');
+        const captchaBtn = document.getElementById('captcha-btn');
+
+        if (!sliderPassed) {
+            captchaLog.textContent = '验证失败：请先把滑块拖到指定位置。';
+            return;
+        }
+        if (!shapePassed) {
+            captchaLog.textContent = '验证失败：请选择最小图形。';
+            return;
+        }
+        if (captchaPassed) return;
+
+        captchaPassed = true;
+        captchaBtn.disabled = true;
+        const checks = [
+            '正在校验滑动轨迹...',
+            '正在比对图形面积...',
+            '正在确认你不是自动答题脚本...',
+            '验证通过：欢迎进入恶魔轮盘赌。'
+        ];
+
+        for (const text of checks) {
+            captchaLog.textContent = text;
+            await sleep(450);
+        }
+
+        document.getElementById('captcha-screen').style.display = 'none';
+        startScreen.style.display = 'block';
+    }
+
+    setupSliderCaptcha();
+    setupShapeCaptcha();
+
+    // ===================================================================
+    //  启动模式
+    // ===================================================================
+    function startOnlineMode() {
+        location.href = './p2p-buckshot.html';
+    }
+
+    function startNormalMode() {
+        startScreen.style.display = 'none';
+        gameDiv.style.display = 'block';
+        G.isInfiniteMode = false;
+        initGame();
+    }
+
+    // ===================================================================
+    //  启动无限模式（含过场动画）
+    // ===================================================================
+    async function startInfiniteMode() {
+        startScreen.style.display = 'none';
+        gameDiv.style.display = 'block';
+        
+        // 1. 先显示普通对局界面，模拟正常开局
+        G.isInfiniteMode = false;
+        initGame();
+        
+        // 2. 500ms后瞬间消失，进入报错
+        await sleep(500);
+        gameDiv.style.display = 'none';
+        errorScreen.style.display = 'block';
+        
+        // 3. 生成报错信息
+        const errors = [
+            'Uncaught RangeError: Maximum call stack size exceeded',
+            '    at fireShot (game.js:176)',
+            '    at fireShot (game.js:182)',
+            '    at fireShot (game.js:182)',
+            '    at fireShot (game.js:182)',
+            '    at fireShot (game.js:182)',
+            '',
+            'Uncaught TypeError: Cannot set properties of undefined (setting \'turn\')',
+            '    at nextRound (game.js:420)',
+            '',
+            'Uncaught Error: 约分悖论：分母不能等于分子的一半',
+            '    at formatFraction (game.js:95)',
+            '    at render (game.js:210)',
+            '',
+            'Uncaught DOMException: String contains an invalid character',
+            '    at log (game.js:112)',
+            '',
+            'RangeError: Invalid array length',
+            '    at initBullets (game.js:128)',
+            '    at initGame (game.js:342)',
+            '',
+            'TypeError: Cannot read properties of null (reading \'style\')',
+            '    at <anonymous>:1:10',
+            '',
+            '⚠️ 核心逻辑崩溃，弹巢数据溢出',
+            '⚠️ 分数系统异常，局数变量损坏',
+            '⚠️ 正在强制终止进程...',
+        ];
+
+        errorScreen.innerHTML = '';
+        for (let i = 0; i < errors.length; i++) {
+            await sleep(100);
+            const line = document.createElement('div');
+            line.className = 'error-line';
+            line.textContent = errors[i];
+            errorScreen.appendChild(line);
+            errorScreen.scrollTop = errorScreen.scrollHeight;
+        }
+
+        // 4. 2秒后进入重启界面
+        await sleep(2000);
+        errorScreen.style.display = 'none';
+        rebootScreen.style.display = 'block';
+
+        // 5. Linux字符进度条
+        const steps = [
+            { p: 10, text: '正在修复约分逻辑溢出...' },
+            { p: 30, text: '正在重置弹巢随机种子...' },
+            { p: 60, text: '正在绕过局数限制...' },
+            { p: 80, text: '正在加载隐藏道具库...' },
+            { p: 100, text: '无限模式已激活' },
+        ];
+
+        for (const step of steps) {
+            await sleep(600);
+            const fill = Math.floor(step.p / 10);
+            const bar = '='.repeat(fill) + '>' + ' '.repeat(10 - fill);
+            progressBar.textContent = `[${bar}] ${step.p}%`;
+            progressText.textContent = step.text;
+        }
+
+        // 6. 1秒后进入游戏
+        await sleep(1000);
+        rebootScreen.style.display = 'none';
+        gameDiv.style.display = 'block';
+
+        // 初始化无限模式
+        G.isInfiniteMode = true;
+        G.round = 1;
+        resetHp();
+        resetItems();
+        initBullets();
+        G.roundOver = false;
+        G.gameOver = false;
+        G.turn = 'player';
+        G.nextFirst = 0;
+        G.waitingForAction = false;
+        clearLog();
+        log('⚠️ 警告：系统异常，局数锁定为 -1', 'danger-text');
+        log('🎯 无限模式已激活，对决将无限持续', 'highlight');
+        log('规则：朝自己开枪空弹继续，朝对方开枪空弹换手');
+        log('新增道具：军用匕首（下一发实弹伤害翻倍，可叠加）');
+        log('第3局起可选择退出游戏，带着100万逃离学校');
+        log('============================================');
+        render();
+        updateButtons();
+    }
+
+    // ===================================================================
+    //  初始化游戏（普通模式）
+    // ===================================================================
+    function initGame() {
+        G.round = 1;
+        resetHp();
+        resetItems();
+        initBullets();
+        G.roundOver = false;
+        G.gameOver = false;
+        G.turn = 'player';
+        G.nextFirst = 0;
+        G.waitingForAction = false;
+        clearLog();
+        log('🎯 恶魔轮盘赌 · 数学老师特供版', 'highlight');
+        log('规则：连胜三局获胜，你死亡则游戏直接结束');
+        log('朝自己开枪空弹继续回合，朝对方开枪空弹换手');
+        log('第二局起解锁道具：辣条(回血) 饮料(移除顶部) 手机(锁先手)');
+        log('============================================');
+        render();
+        updateButtons();
+    }
+</script>
+</body>
+</html>
