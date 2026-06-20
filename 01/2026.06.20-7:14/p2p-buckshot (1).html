@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>恶魔轮盘赌 · 无后端 P2P 联机版</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0a0a0a;
+            color: #ddd;
+            font-family: "Courier New", monospace;
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(255,255,255,.025) 0,
+                rgba(255,255,255,.025) 1px,
+                transparent 1px,
+                transparent 4px
+            );
+            mix-blend-mode: screen;
+            opacity: .35;
+            z-index: 50;
+        }
+        body::after {
+            content: "目前未完成";
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%) rotate(-18deg);
+            color: rgba(255, 68, 68, .11);
+            border: 5px double rgba(255, 68, 68, .16);
+            border-radius: 14px;
+            padding: 18px 42px;
+            font-size: clamp(42px, 10vw, 120px);
+            font-weight: 900;
+            letter-spacing: 8px;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 51;
+            text-shadow: 0 0 18px rgba(255, 0, 0, .22);
+        }
+        h1 {
+            color: #ffcc00;
+            text-align: center;
+            letter-spacing: 3px;
+            margin: 18px 0 4px;
+        }
+        .unfinished-banner {
+            position: relative;
+            overflow: hidden;
+            margin: 0 auto 16px;
+            max-width: 620px;
+            background: #180808;
+            border: 1px solid #aa4444;
+            border-radius: 10px;
+            padding: 12px 16px;
+            color: #ff7777;
+            text-align: center;
+            letter-spacing: 2px;
+            box-shadow: 0 0 20px rgba(255, 68, 68, .12);
+            animation: unfinishedPulse 1.6s infinite;
+        }
+        .unfinished-banner::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(
+                120deg,
+                transparent 0%,
+                rgba(255,255,255,.12) 45%,
+                transparent 60%
+            );
+            transform: translateX(-100%);
+            animation: unfinishedSweep 2.4s infinite;
+        }
+        .unfinished-banner strong {
+            color: #ffcc00;
+        }
+        .glitch-text {
+            display: inline-block;
+            position: relative;
+            animation: glitchJitter 1.2s infinite steps(2, end);
+        }
+        .glitch-text::before,
+        .glitch-text::after {
+            content: attr(data-text);
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: .55;
+        }
+        .glitch-text::before {
+            color: #44aaff;
+            transform: translate(1px, 0);
+            clip-path: inset(0 0 55% 0);
+        }
+        .glitch-text::after {
+            color: #ff4444;
+            transform: translate(-1px, 0);
+            clip-path: inset(55% 0 0 0);
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 18px;
+        }
+        .panel {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 18px;
+            margin-bottom: 14px;
+            box-shadow: 0 0 24px rgba(0,0,0,0.6);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 14px;
+        }
+        .role-forms {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+            align-items: start;
+        }
+        .role-panel {
+            background: #111;
+            border: 1px solid #444;
+            border-radius: 10px;
+            overflow: hidden;
+            transition: border-color .18s, box-shadow .18s, background .18s;
+        }
+        .role-panel[open] {
+            background: #17140b;
+            border-color: #ffcc00;
+            box-shadow: 0 0 18px rgba(255, 204, 0, .14);
+        }
+        .role-card {
+            display: block;
+            padding: 16px;
+            cursor: pointer;
+            transition: all .18s;
+            margin: 0;
+            list-style: none;
+        }
+        .role-card::-webkit-details-marker { display: none; }
+        .role-card:hover {
+            background: #181818;
+        }
+        .role-panel[open] .role-card:hover {
+            background: #221d0d;
+        }
+        .role-card strong {
+            display: block;
+            color: #ffcc00;
+            font-size: 18px;
+            margin-bottom: 6px;
+        }
+        .role-card span {
+            display: block;
+            color: #888;
+            font-size: 13px;
+        }
+        .role-content {
+            padding: 0 16px 16px;
+            animation: panelIn .18s ease-out;
+        }
+        @keyframes panelIn {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        label {
+            display: block;
+            color: #aaa;
+            font-size: 14px;
+            margin: 10px 0 5px;
+        }
+        input, textarea {
+            width: 100%;
+            background: #0d0d0d;
+            color: #eee;
+            border: 1px solid #555;
+            border-radius: 6px;
+            padding: 10px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+            word-break: break-all;
+        }
+        button {
+            background: #252525;
+            color: #eee;
+            border: 1px solid #555;
+            padding: 10px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 15px;
+            margin: 8px 8px 0 0;
+            transition: all .15s;
+        }
+        button:hover:not(:disabled) {
+            background: #3a3a3a;
+            border-color: #aaa;
+            transform: scale(1.02);
+        }
+        button:disabled {
+            opacity: .35;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .success { border-color: #44aa44; color: #77ff77; }
+        .success:hover:not(:disabled) { background: #113311; border-color: #55ff55; }
+        .danger { border-color: #aa4444; color: #ff7777; }
+        .danger:hover:not(:disabled) { background: #441111; border-color: #ff5555; }
+        .warn { border-color: #ccaa44; color: #ffdd77; }
+        .warn:hover:not(:disabled) { background: #332a11; border-color: #ffdd55; }
+        #status {
+            background: #0d0d0d;
+            border-left: 4px solid #ffcc00;
+            border-radius: 8px;
+            padding: 14px 16px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            min-height: 128px;
+            margin-bottom: 12px;
+        }
+        #log {
+            background: #070707;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            height: 230px;
+            overflow-y: auto;
+            padding: 12px 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .small { color: #888; font-size: 13px; }
+        .hidden { display: none; }
+        .highlight { color: #ffcc00; }
+        .info-text { color: #88ccff; }
+        .success-text { color: #55ff55; }
+        .danger-text { color: #ff5555; }
+        .code-tip {
+            background: #101010;
+            border: 1px dashed #555;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-top: 10px;
+        }
+        @keyframes unfinishedPulse {
+            0%, 100% { opacity: .88; filter: brightness(1); }
+            50% { opacity: 1; filter: brightness(1.18); }
+        }
+        @keyframes unfinishedSweep {
+            0% { transform: translateX(-120%); }
+            55%, 100% { transform: translateX(120%); }
+        }
+        @keyframes glitchJitter {
+            0%, 100% { transform: translate(0, 0); }
+            20% { transform: translate(1px, -1px); }
+            40% { transform: translate(-1px, 1px); }
+            60% { transform: translate(1px, 1px); }
+            80% { transform: translate(-1px, -1px); }
+        }
+    </style>
+</head>
+<body>
+<h1>恶魔轮盘赌</h1>
+<div class="subtitle">无后端 P2P 联机版：不买服务器，复制邀请码直连</div>
+<div class="unfinished-banner">
+    <span class="glitch-text" data-text="目前未完成">目前未完成</span>
+    <span> | <strong>实验性联机模块</strong> | 可能随时爆炸</span>
+</div>
+
+<section class="panel" id="setup">
+    <div class="role-forms">
+        <details class="role-panel" id="host-panel" name="role-choice">
+            <summary class="role-card">
+                <strong>我想当房主</strong>
+                <span>生成邀请码，发给朋友；收到回应码后开始连接。</span>
+            </summary>
+            <div class="role-content">
+            <h3>我是房主</h3>
+            <label>你的名字</label>
+            <input id="host-name" maxlength="12" value="房主">
+            <button class="success" id="create-offer">生成邀请码</button>
+            <label>把这个邀请码发给朋友</label>
+            <textarea id="offer-code" readonly></textarea>
+            <button id="copy-offer">复制邀请码</button>
+            <label>粘贴朋友发回来的回应码</label>
+            <textarea id="answer-input"></textarea>
+            <button class="warn" id="accept-answer">连接朋友</button>
+            </div>
+        </details>
+        <details class="role-panel" id="guest-panel" name="role-choice">
+            <summary class="role-card">
+                <strong>我想加入房间</strong>
+                <span>粘贴房主的邀请码，生成回应码，再发回给房主。</span>
+            </summary>
+            <div class="role-content">
+            <h3>我是加入者</h3>
+            <label>你的名字</label>
+            <input id="guest-name" maxlength="12" value="同学">
+            <label>粘贴房主的邀请码</label>
+            <textarea id="offer-input"></textarea>
+            <button class="success" id="join-offer">生成回应码</button>
+            <label>把这个回应码发回给房主</label>
+            <textarea id="answer-code" readonly></textarea>
+            <button id="copy-answer">复制回应码</button>
+            </div>
+        </details>
+    </div>
+    <div class="code-tip small">
+        连接步骤：房主生成邀请码 → 加入者粘贴邀请码并生成回应码 → 房主粘贴回应码并点击连接。连接成功后会自动开始游戏。
+    </div>
+</section>
+
+<section class="panel hidden" id="game">
+    <div id="status">等待连接...</div>
+    <div>
+        <button class="danger" id="shoot-self">打自己</button>
+        <button class="success" id="shoot-enemy">打对方</button>
+        <button class="warn" id="next-round">进入下一局</button>
+        <span id="item-buttons"></span>
+    </div>
+    <div id="log"></div>
+</section>
+
+<script>
+    const els = {
+        setup: document.getElementById('setup'),
+        game: document.getElementById('game'),
+        hostName: document.getElementById('host-name'),
+        guestName: document.getElementById('guest-name'),
+        offerCode: document.getElementById('offer-code'),
+        offerInput: document.getElementById('offer-input'),
+        answerInput: document.getElementById('answer-input'),
+        answerCode: document.getElementById('answer-code'),
+        status: document.getElementById('status'),
+        log: document.getElementById('log'),
+        shootSelf: document.getElementById('shoot-self'),
+        shootEnemy: document.getElementById('shoot-enemy'),
+        nextRound: document.getElementById('next-round'),
+        itemButtons: document.getElementById('item-buttons'),
+    };
+
+    const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    const ITEMS = ['辣条', '饮料', '手机'];
+
+    let pc = null;
+    let dc = null;
+    let role = null;
+    let mySeat = null;
+    let connected = false;
+    let state = null;
+
+    function safeName(name, fallback) {
+        return (name || fallback).trim().slice(0, 12) || fallback;
+    }
+
+    function pack(obj) {
+        return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+    }
+
+    function unpack(text) {
+        return JSON.parse(decodeURIComponent(escape(atob(text.trim()))));
+    }
+
+    function waitIceComplete(peer) {
+        if (peer.iceGatheringState === 'complete') return Promise.resolve();
+        return new Promise(resolve => {
+            const timer = setTimeout(resolve, 3500);
+            peer.addEventListener('icegatheringstatechange', () => {
+                if (peer.iceGatheringState === 'complete') {
+                    clearTimeout(timer);
+                    resolve();
+                }
+            });
+        });
+    }
+
+    function addLog(message, cls = '') {
+        const line = document.createElement('div');
+        line.textContent = message;
+        if (cls) line.className = cls;
+        els.log.appendChild(line);
+        els.log.scrollTop = els.log.scrollHeight;
+        while (els.log.children.length > 80) els.log.removeChild(els.log.firstChild);
+    }
+
+    function showGame() {
+        els.setup.classList.add('hidden');
+        els.game.classList.remove('hidden');
+    }
+
+    function send(message) {
+        if (dc && dc.readyState === 'open') {
+            dc.send(JSON.stringify(message));
+        }
+    }
+
+    function broadcastState() {
+        render();
+        send({ type: 'state', state: publicState('p2') });
+    }
+
+    function broadcastLog(message, cls = '') {
+        addLog(message, cls);
+        send({ type: 'log', message, cls });
+    }
+
+    function rand(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function gcd(a, b) {
+        a = Math.abs(a);
+        b = Math.abs(b);
+        while (b) [a, b] = [b, a % b];
+        return a || 1;
+    }
+
+    function formatFraction(num, den) {
+        const g = gcd(num, den);
+        return `${num / g}/${den / g}`;
+    }
+
+    function makeBullets() {
+        const total = rand(4, 10);
+        const realCount = rand(1, total - 1);
+        const bullets = [
+            ...Array(realCount).fill('real'),
+            ...Array(total - realCount).fill('blank')
+        ];
+        for (let i = bullets.length - 1; i > 0; i--) {
+            const j = rand(0, i);
+            [bullets[i], bullets[j]] = [bullets[j], bullets[i]];
+        }
+        return bullets;
+    }
+
+    function makeItems(round) {
+        if (round < 2) return [];
+        const pool = [...ITEMS];
+        return Array.from({ length: 2 }, () => {
+            const i = rand(0, pool.length - 1);
+            return pool.splice(i, 1)[0];
+        });
+    }
+
+    function newGame(hostName, guestName) {
+        state = {
+            round: 1,
+            maxHp: 3,
+            players: [
+                { seat: 'p1', name: hostName, hp: 3, items: [] },
+                { seat: 'p2', name: guestName, hp: 3, items: [] }
+            ],
+            bullets: makeBullets(),
+            bulletIndex: 0,
+            shotsFired: 0,
+            turn: 'p1',
+            roundOver: false,
+            gameOver: false,
+            nextFirst: null,
+        };
+    }
+
+    function resetRound() {
+        state.maxHp = state.round === 1 ? 3 : state.round === 2 ? 5 : 8;
+        state.players.forEach(p => {
+            p.hp = state.maxHp;
+            p.items = makeItems(state.round);
+        });
+        state.bullets = makeBullets();
+        state.bulletIndex = 0;
+        state.shotsFired = 0;
+        state.turn = state.nextFirst || 'p1';
+        state.nextFirst = null;
+        state.roundOver = false;
+        state.gameOver = false;
+    }
+
+    function remainBullets() {
+        const remain = state.bullets.slice(state.bulletIndex);
+        return {
+            real: remain.filter(x => x === 'real').length,
+            blank: remain.filter(x => x === 'blank').length,
+            total: remain.length,
+        };
+    }
+
+    function publicState(receiverSeat) {
+        return {
+            ...state,
+            bulletsInfo: remainBullets(),
+            fraction: formatFraction(state.shotsFired, state.bullets.length),
+            players: state.players.map(p => ({
+                seat: p.seat,
+                name: p.name,
+                hp: p.hp,
+                items: p.seat === receiverSeat ? p.items : Array(p.items.length).fill('未知道具')
+            })),
+        };
+    }
+
+    function player(seat) {
+        return state.players.find(p => p.seat === seat);
+    }
+
+    function opponent(seat) {
+        return state.players.find(p => p.seat !== seat);
+    }
+
+    function render(externalState = null) {
+        const view = externalState || publicState(mySeat);
+        const me = view.players.find(p => p.seat === mySeat);
+        const enemy = view.players.find(p => p.seat !== mySeat);
+        const turnPlayer = view.players.find(p => p.seat === view.turn);
+        const bullets = view.bulletsInfo || remainBullets();
+        const fraction = view.fraction || formatFraction(view.shotsFired, view.bullets.length);
+        const isMyTurn = view.turn === mySeat && !view.roundOver && !view.gameOver && connected;
+
+        els.status.textContent =
+            `身份：${role === 'host' ? '房主' : '加入者'}  座位：${mySeat}\n` +
+            `【第${view.round}局】当前回合：${turnPlayer ? turnPlayer.name : '等待中'}\n` +
+            `你：${me ? me.hp : '-'}血  对方：${enemy ? enemy.hp : '-'}血\n` +
+            `分数：${fraction} | 剩余子弹：实弹${bullets.real}发 / 空弹${bullets.blank}发（合计${bullets.total}）\n` +
+            `你的道具：${me && me.items.length ? me.items.join('、') : '无'}\n` +
+            `${view.gameOver ? '游戏结束' : view.roundOver ? '本局结束' : isMyTurn ? '轮到你操作' : '等待对方操作'}`;
+
+        els.shootSelf.disabled = !isMyTurn;
+        els.shootEnemy.disabled = !isMyTurn;
+        els.nextRound.disabled = !(role === 'host' && view.roundOver && !view.gameOver);
+
+        els.itemButtons.innerHTML = '';
+        if (isMyTurn && me) {
+            me.items.forEach(item => {
+                const btn = document.createElement('button');
+                btn.className = 'warn';
+                btn.textContent = `使用${item}`;
+                btn.onclick = () => action({ type: 'useItem', item });
+                els.itemButtons.appendChild(btn);
+            });
+        }
+    }
+
+    function fireShot() {
+        if (state.bulletIndex >= state.bullets.length) {
+            state.bullets = makeBullets();
+            state.bulletIndex = 0;
+            state.shotsFired = 0;
+            return 'reload';
+        }
+        let bullet = state.bullets[state.bulletIndex];
+        if (state.bullets.length === 2 * state.shotsFired) bullet = 'real';
+        state.bulletIndex++;
+        state.shotsFired++;
+        return bullet;
+    }
+
+    function action(message) {
+        if (role === 'host') {
+            handleAction(mySeat, message);
+        } else {
+            send({ type: 'action', action: message });
+        }
+    }
+
+    function handleAction(seat, message) {
+        if (role !== 'host' || !state || state.turn !== seat || state.roundOver || state.gameOver) return;
+        const actor = player(seat);
+        const enemy = opponent(seat);
+
+        if (message.type === 'useItem') {
+            const itemIndex = actor.items.indexOf(message.item);
+            if (itemIndex === -1) return;
+
+            if (message.item === '辣条') {
+                if (actor.hp >= state.maxHp) return;
+                actor.hp++;
+                actor.items.splice(itemIndex, 1);
+                broadcastLog(`${actor.name}吃了辣条，+1血`, 'success-text');
+            }
+            if (message.item === '饮料') {
+                if (state.bulletIndex >= state.bullets.length) return;
+                state.bulletIndex++;
+                actor.items.splice(itemIndex, 1);
+                broadcastLog(`${actor.name}喝了饮料，移除顶部一发子弹`, 'info-text');
+            }
+            if (message.item === '手机') {
+                state.nextFirst = actor.seat;
+                actor.items.splice(itemIndex, 1);
+                broadcastLog(`${actor.name}使用手机，下局锁定先手`, 'info-text');
+            }
+            broadcastState();
+            return;
+        }
+
+        if (message.type !== 'shoot') return;
+        const target = message.target === 'enemy' ? enemy : actor;
+        broadcastLog(`${actor.name}朝${target === actor ? '自己' : enemy.name}开枪`, 'info-text');
+        const result = fireShot();
+
+        if (result === 'reload') {
+            broadcastLog('弹巢已空，重新上弹。本次不造成伤害。', 'info-text');
+            broadcastState();
+            return;
+        }
+
+        if (result === 'blank') {
+            broadcastLog('空弹');
+            if (target === actor) {
+                broadcastLog(`${actor.name}继续回合`, 'info-text');
+            } else {
+                state.turn = enemy.seat;
+                broadcastLog(`换手，轮到${enemy.name}`, 'info-text');
+            }
+            broadcastState();
+            return;
+        }
+
+        target.hp = Math.max(0, target.hp - 1);
+        broadcastLog(`${target.name}中弹，-1血`, target === actor ? 'danger-text' : 'success-text');
+
+        if (target.hp <= 0) {
+            if (target === actor) {
+                state.roundOver = true;
+                state.gameOver = true;
+                broadcastLog(`${actor.name}倒下了，${enemy.name}获得最终胜利！`, 'danger-text');
+            } else {
+                state.roundOver = true;
+                broadcastLog(`${enemy.name}被击倒，${actor.name}赢下这一局！`, 'success-text');
+                if (state.round >= 3) {
+                    state.gameOver = true;
+                    broadcastLog(`${actor.name}连赢三局，彻底获胜！`, 'highlight');
+                }
+            }
+        } else {
+            state.turn = enemy.seat;
+            broadcastLog(`换手，轮到${enemy.name}`, 'info-text');
+        }
+
+        broadcastState();
+    }
+
+    function nextRound() {
+        if (role !== 'host' || !state || !state.roundOver || state.gameOver) return;
+        state.round++;
+        resetRound();
+        broadcastLog(`========== 第${state.round}局开始 ==========`, 'highlight');
+        broadcastState();
+    }
+
+    function onChannelOpen() {
+        connected = true;
+        showGame();
+        addLog('P2P 连接成功，不需要后端服务器。', 'highlight');
+
+        if (role === 'host') {
+            const hostName = safeName(els.hostName.value, '房主');
+            send({ type: 'hello', name: hostName });
+        } else {
+            const guestName = safeName(els.guestName.value, '同学');
+            send({ type: 'hello', name: guestName });
+        }
+        render(state ? undefined : {
+            round: 1,
+            players: [],
+            turn: null,
+            roundOver: false,
+            gameOver: false,
+            bulletsInfo: { real: 0, blank: 0, total: 0 },
+            fraction: '0/0',
+        });
+    }
+
+    function bindChannel(channel) {
+        dc = channel;
+        dc.onopen = onChannelOpen;
+        dc.onmessage = event => {
+            const msg = JSON.parse(event.data);
+
+            if (msg.type === 'hello' && role === 'host') {
+                newGame(safeName(els.hostName.value, '房主'), safeName(msg.name, '同学'));
+                broadcastLog('双方到齐，对局开始！', 'highlight');
+                broadcastState();
+            }
+            if (msg.type === 'state' && role === 'guest') {
+                render(msg.state);
+            }
+            if (msg.type === 'log' && role === 'guest') {
+                addLog(msg.message, msg.cls || '');
+            }
+            if (msg.type === 'action' && role === 'host') {
+                handleAction('p2', msg.action);
+            }
+        };
+        dc.onclose = () => {
+            connected = false;
+            addLog('P2P 连接已断开', 'danger-text');
+            render();
+        };
+    }
+
+    async function createOffer() {
+        role = 'host';
+        mySeat = 'p1';
+        pc = new RTCPeerConnection(ICE);
+        bindChannel(pc.createDataChannel('game'));
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await waitIceComplete(pc);
+        els.offerCode.value = pack(pc.localDescription);
+        addLog('邀请码已生成，发给朋友。', 'info-text');
+    }
+
+    async function joinOffer() {
+        role = 'guest';
+        mySeat = 'p2';
+        pc = new RTCPeerConnection(ICE);
+        pc.ondatachannel = event => bindChannel(event.channel);
+        const offer = unpack(els.offerInput.value);
+        await pc.setRemoteDescription(offer);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await waitIceComplete(pc);
+        els.answerCode.value = pack(pc.localDescription);
+        addLog('回应码已生成，发回给房主。', 'info-text');
+    }
+
+    async function acceptAnswer() {
+        if (!pc || role !== 'host') return;
+        const answer = unpack(els.answerInput.value);
+        await pc.setRemoteDescription(answer);
+        addLog('正在等待 P2P 连接建立...', 'info-text');
+    }
+
+    async function copyText(text) {
+        if (!text) return;
+        await navigator.clipboard.writeText(text);
+        addLog('已复制。', 'info-text');
+    }
+
+    document.getElementById('create-offer').onclick = () => createOffer().catch(err => addLog(err.message, 'danger-text'));
+    document.getElementById('join-offer').onclick = () => joinOffer().catch(err => addLog(err.message, 'danger-text'));
+    document.getElementById('accept-answer').onclick = () => acceptAnswer().catch(err => addLog(err.message, 'danger-text'));
+    document.getElementById('copy-offer').onclick = () => copyText(els.offerCode.value).catch(() => addLog('复制失败，请手动复制。', 'danger-text'));
+    document.getElementById('copy-answer').onclick = () => copyText(els.answerCode.value).catch(() => addLog('复制失败，请手动复制。', 'danger-text'));
+    els.shootSelf.onclick = () => action({ type: 'shoot', target: 'self' });
+    els.shootEnemy.onclick = () => action({ type: 'shoot', target: 'enemy' });
+    els.nextRound.onclick = nextRound;
+
+    addLog('这个版本是纯静态 HTML，不需要 Node.js、WebSocket 服务器或月租后端。', 'highlight');
+</script>
+</body>
+</html>
