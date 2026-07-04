@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小游戏合集 · 入口</title>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 20% 10%, rgba(255, 204, 0, .08), transparent 28%),
+                radial-gradient(circle at 80% 20%, rgba(68, 170, 255, .08), transparent 30%),
+                #0a0a0a;
+            color: #ddd;
+            font-family: "Courier New", monospace;
+            padding: 28px;
+            line-height: 1.6;
+        }
+        .shell {
+            max-width: 1120px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin: 18px 0 30px;
+            position: relative;
+        }
+        .corner-link {
+            position: absolute;
+            left: 0;
+            top: -4px;
+            color: #666;
+            font-size: 12px;
+            text-decoration: none;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 2px 8px;
+            cursor: pointer;
+            transition: color .2s, border-color .2s, background .2s;
+        }
+        .corner-link:hover {
+            color: #88ccff;
+            border-color: #88ccff;
+            background: rgba(68,170,255,.06);
+        }
+        .corner-link .unread-badge {
+            display: none;
+            background: #ff4444;
+            color: #fff;
+            font-size: 10px;
+            border-radius: 50%;
+            min-width: 14px;
+            height: 14px;
+            line-height: 14px;
+            text-align: center;
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+        .corner-link .unread-badge.show { display: inline-block; }
+        h1 {
+            color: #ffcc00;
+            font-size: clamp(30px, 6vw, 54px);
+            letter-spacing: 6px;
+            text-shadow: 0 0 22px rgba(255, 204, 0, .18);
+        }
+        .subtitle {
+            color: #888;
+            margin-top: 8px;
+            font-size: 15px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 12px;
+            margin-bottom: 22px;
+        }
+        .stat {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 14px 16px;
+            box-shadow: 0 0 22px rgba(0,0,0,.45);
+        }
+        .stat strong {
+            display: block;
+            color: #ffcc00;
+            font-size: 24px;
+        }
+        .stat span {
+            color: #888;
+            font-size: 13px;
+        }
+        .section-title {
+            color: #eee;
+            margin: 20px 0 12px;
+            font-size: 20px;
+            letter-spacing: 2px;
+        }
+        .game-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 14px;
+        }
+        .game-card {
+            position: relative;
+            min-height: 180px;
+            background: linear-gradient(145deg, #151515, #0f0f0f);
+            border: 1px solid #333;
+            border-radius: 16px;
+            padding: 18px;
+            overflow: hidden;
+            box-shadow: 0 0 26px rgba(0,0,0,.55);
+            transition: transform .18s, border-color .18s, box-shadow .18s;
+        }
+        .game-card::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(120deg, transparent, rgba(255,255,255,.05), transparent);
+            transform: translateX(-120%);
+            transition: transform .5s;
+        }
+        .game-card:hover::before { transform: translateX(120%); }
+        .game-card.enabled { cursor: pointer; border-color: #665522; }
+        .game-card.enabled:hover {
+            transform: translateY(-4px);
+            border-color: #ffcc00;
+            box-shadow: 0 0 28px rgba(255,204,0,.14);
+        }
+        .game-card.locked { opacity: .58; filter: grayscale(.45); }
+        .tag {
+            display: inline-block;
+            color: #88ccff;
+            border: 1px solid #335577;
+            border-radius: 999px;
+            padding: 3px 9px;
+            font-size: 12px;
+            margin-bottom: 12px;
+            background: rgba(68,170,255,.08);
+        }
+        .tag.soon { color: #888; border-color: #444; background: rgba(255,255,255,.04); }
+        .game-card h2 { color: #ffcc00; font-size: 22px; margin-bottom: 8px; }
+        .game-card p { color: #aaa; font-size: 14px; }
+        .play-line {
+            position: absolute;
+            left: 18px;
+            right: 18px;
+            bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: #ddd;
+            font-size: 13px;
+        }
+        .arrow { color: #ffcc00; font-size: 20px; }
+        .placeholder-icon {
+            position: absolute;
+            right: 18px;
+            bottom: 12px;
+            color: rgba(255,255,255,.08);
+            font-size: 48px;
+            font-weight: 900;
+        }
+        footer {
+            margin-top: 28px;
+            color: #666;
+            text-align: center;
+            font-size: 13px;
+        }
+        @media (max-width: 560px) {
+            body { padding: 18px; }
+            h1 { letter-spacing: 3px; }
+        }
+
+        /* ===================================================================
+           聊天侧边栏
+           =================================================================== */
+        .chat-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.45);
+            z-index: 999;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .25s;
+        }
+        .chat-overlay.open { opacity: 1; pointer-events: auto; }
+
+        .chat-drawer {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: min(420px, 92vw);
+            height: 100vh;
+            background: #111;
+            border-left: 1px solid #333;
+            z-index: 1000;
+            transform: translateX(100%);
+            transition: transform .3s ease;
+            display: flex;
+            flex-direction: column;
+            box-shadow: -4px 0 24px rgba(0,0,0,.6);
+        }
+        .chat-drawer.open { transform: translateX(0); }
+
+        .chat-drawer-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid #2a2a2a;
+            flex-shrink: 0;
+        }
+        .chat-drawer-header h2 { color: #ffcc00; font-size: 16px; }
+        .chat-drawer-header .online-count { color: #55ff55; font-size: 12px; }
+        .chat-close {
+            background: none;
+            border: 1px solid #555;
+            color: #aaa;
+            padding: 2px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        .chat-close:hover { color: #ff5555; border-color: #ff5555; }
+
+        /* 聊天设置区 */
+        .chat-setup {
+            padding: 14px 16px;
+            flex-shrink: 0;
+        }
+        .chat-setup .row {
+            display: flex;
+            gap: 8px;
+            margin: 8px 0;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .chat-setup .row label {
+            width: 100%;
+            color: #aaa;
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+        .chat-setup input {
+            flex: 1;
+            min-width: 100px;
+            background: #0d0d0d;
+            color: #eee;
+            border: 1px solid #555;
+            border-radius: 5px;
+            padding: 7px 10px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        .chat-setup input:focus { outline: none; border-color: #ffcc00; }
+        .chat-setup button {
+            background: #252525;
+            color: #eee;
+            border: 1px solid #555;
+            padding: 7px 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            flex: 0 1 auto;
+            white-space: nowrap;
+        }
+        .chat-setup button:hover { background: #3a3a3a; border-color: #aaa; }
+        .chat-setup .btn-success { border-color: #44aa44; color: #77ff77; }
+        .chat-setup .btn-success:hover { background: #113311; }
+        .chat-setup .btn-warn { border-color: #ccaa44; color: #ffdd77; }
+        .chat-setup .btn-warn:hover { background: #332a11; }
+        .chat-setup .btn-danger { border-color: #aa4444; color: #ff7777; }
+        .chat-setup .btn-danger:hover { background: #441111; }
+
+        .preset-mini {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .preset-mini-item {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 6px;
+            text-align: center;
+            cursor: pointer;
+            font-size: 11px;
+            color: #aaa;
+            transition: all .15s;
+        }
+        .preset-mini-item:hover { border-color: #ffcc00; color: #ffcc00; }
+        .preset-mini-item .num { color: #ffcc00; font-size: 15px; font-weight: 900; letter-spacing: 2px; }
+
+        /* 聊天消息区 */
+        .chat-tabs {
+            display: flex;
+            gap: 3px;
+            padding: 8px 16px 0;
+            flex-shrink: 0;
+        }
+        .chat-tab {
+            background: #0d0d0d;
+            border: 1px solid #333;
+            border-bottom: none;
+            border-radius: 5px 5px 0 0;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #888;
+            position: relative;
+        }
+        .chat-tab.active { background: #1a1a1a; border-color: #ffcc00; color: #ffcc00; }
+        .chat-tab .tab-unread {
+            position: absolute;
+            top: -3px;
+            right: -3px;
+            background: #ff4444;
+            color: #fff;
+            font-size: 10px;
+            border-radius: 50%;
+            min-width: 14px;
+            height: 14px;
+            line-height: 14px;
+            text-align: center;
+            display: none;
+        }
+        .chat-tab .tab-unread.show { display: block; }
+        .chat-tab .tab-close {
+            margin-left: 4px;
+            color: #555;
+            cursor: pointer;
+        }
+        .chat-tab .tab-close:hover { color: #ff4444; }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 14px;
+            margin: 0 16px;
+            border: 1px solid #2a2a2a;
+            border-radius: 6px;
+            background: #0d0d0d;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .chat-messages::-webkit-scrollbar { width: 5px; }
+        .chat-messages::-webkit-scrollbar-track { background: #1a1a1a; }
+        .chat-messages::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+
+        .cm { padding: 3px 0; }
+        .cm .cn { font-weight: 700; }
+        .cm .ct { color: #555; font-size: 11px; margin-left: 6px; }
+        .cm .cb { color: #ccc; }
+        .cm.sys { color: #888; font-style: italic; }
+        .cm.priv { border-left: 2px solid #aa44ff; padding-left: 6px; }
+        .cm.self .cn { color: #88ccff; }
+        .cm.other .cn { color: #ffcc00; }
+
+        .chat-input-row {
+            display: flex;
+            gap: 6px;
+            padding: 8px 16px;
+            flex-shrink: 0;
+        }
+        .chat-input-row input {
+            flex: 1;
+            background: #0d0d0d;
+            color: #eee;
+            border: 1px solid #555;
+            border-radius: 5px;
+            padding: 8px 10px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        .chat-input-row input:focus { outline: none; border-color: #ffcc00; }
+        .chat-input-row button {
+            background: #1a3a1a;
+            color: #77ff77;
+            border: 1px solid #44aa44;
+            padding: 8px 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .chat-input-row button:hover { background: #224422; }
+
+        .chat-users {
+            max-height: 120px;
+            overflow-y: auto;
+            padding: 6px 16px;
+            flex-shrink: 0;
+        }
+        .chat-user {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 3px 4px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+        .chat-user:hover { background: #1a1a1a; }
+        .chat-user .cu-name { color: #ddd; }
+        .chat-user .cu-id { color: #555; font-size: 10px; margin-left: 4px; }
+        .chat-user .cu-self { color: #555; font-size: 11px; margin-left: 4px; }
+        .chat-user .cu-pm {
+            background: #1a1a1a;
+            border: 1px solid #555;
+            color: #cc88ff;
+            padding: 2px 7px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            font-family: inherit;
+        }
+        .chat-user .cu-pm:hover { background: #331133; border-color: #aa44ff; }
+
+        .chat-footer-btns {
+            display: flex;
+            gap: 8px;
+            padding: 8px 16px;
+            flex-shrink: 0;
+        }
+        .chat-footer-btns button {
+            flex: 1;
+            background: #1a1111;
+            color: #ff7777;
+            border: 1px solid #aa4444;
+            padding: 7px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+        }
+        .chat-footer-btns button:hover { background: #331111; }
+
+        /* 更新日志 */
+        .update-log {
+            display: flex;
+            justify-content: center;
+            margin: 0 0 18px;
+        }
+        .update-log details {
+            background: #0d0d0d;
+            border: 1px solid #333;
+            border-radius: 8px;
+            max-width: 720px;
+            width: 100%;
+            overflow: hidden;
+        }
+        .update-log details[open] { border-color: #555; }
+        .update-log summary {
+            padding: 8px 16px;
+            cursor: pointer;
+            color: #888;
+            font-size: 13px;
+            list-style: none;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: color .2s;
+        }
+        .update-log summary::-webkit-details-marker { display: none; }
+        .update-log summary:hover { color: #ffcc00; }
+        .update-log summary::before { content: "▼"; font-size: 10px; transition: transform .2s; }
+        .update-log details[open] summary::before { transform: rotate(180deg); }
+        .update-log summary .log-badge {
+            background: #ff4444; color: #fff; font-size: 10px;
+            border-radius: 50%; min-width: 16px; height: 16px;
+            line-height: 16px; text-align: center;
+        }
+        .log-body { padding: 0 16px 14px; }
+        .log-entry {
+            border-left: 3px solid #444;
+            margin-bottom: 8px;
+            background: #0a0a0a;
+            border-radius: 0 6px 6px 0;
+            overflow: hidden;
+        }
+        .log-entry summary {
+            padding: 6px 10px;
+            cursor: pointer;
+            color: #888;
+            font-size: 12px;
+            list-style: none;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: color .15s;
+        }
+        .log-entry summary::-webkit-details-marker { display: none; }
+        .log-entry summary::before {
+            content: "▶";
+            font-size: 10px;
+            color: #666;
+            transition: transform .2s, color .2s;
+        }
+        .log-entry[open] summary::before {
+            transform: rotate(90deg);
+            color: #ffcc00;
+        }
+        .log-entry summary:hover { color: #ddd; }
+        .log-entry summary strong { color: #ffcc00; font-weight: 700; }
+        .log-entry summary .log-date-tag {
+            color: #666;
+            font-size: 11px;
+            margin-left: auto;
+        }
+        .log-entry ul {
+            list-style: none;
+            padding: 0 10px 8px 28px;
+            margin: 0;
+        }
+        .log-entry ul li {
+            color: #aaa; font-size: 12px;
+            padding: 2px 0 2px 14px; position: relative;
+        }
+        .log-entry ul li::before {
+            content: "•"; position: absolute; left: 0; color: #ffcc00;
+        }
+        .log-entry ul li.fix::before { color: #ff5555; content: "×"; }
+        .log-entry ul li.new::before { color: #55ff55; content: "+"; }
+        .log-entry ul li.change::before { color: #88ccff; content: "~"; }
+    </style>
+</head>
+<body>
+
+<!-- ========== 主页内容 ========== -->
+<main class="shell">
+    <header>
+        <a class="corner-link" id="chat-toggle" onclick="toggleChat()">
+            匿名聊天
+            <span class="unread-badge" id="global-unread">0</span>
+        </a>
+        <h1>小游戏合集</h1>
+        <div class="subtitle">这里是开始界面。以后所有游戏都从这里进入。</div>
+    </header>
+
+    <div class="update-log">
+        <details id="changelog-details">
+            <summary>修复已知问题 <span class="log-badge" id="log-badge">?</span></summary>
+            <div class="log-body" id="log-body">加载中...</div>
+        </details>
+    </div>
+
+    <section class="stats">
+        <div class="stat">
+            <strong>1</strong>
+            <span>已加入游戏</span>
+        </div>
+        <div class="stat">
+            <strong>60+</strong>
+            <span>未来计划槽位</span>
+        </div>
+        <div class="stat">
+            <strong>HTML</strong>
+            <span>GitHub Pages 静态托管</span>
+        </div>
+    </section>
+
+    <h2 class="section-title">选择游戏</h2>
+    <section class="game-grid" id="game-grid">
+        <article class="game-card enabled" onclick="location.href='./01/2026.06.20-7:14/game-bucksht.html'">
+            <span class="tag">第 1 个游戏</span>
+            <h2>恶魔轮盘赌</h2>
+            <p>数学老师特供版。包含普通模式、无限模式、联机模式入口，以及娱乐用人机验证。</p>
+            <div class="play-line">
+                <span>点击开始</span>
+                <span class="arrow">→</span>
+            </div>
+        </article>
+    </section>
+
+    <h2 class="section-title">开发中</h2>
+    <section class="game-grid" id="future-grid"></section>
+
+    <footer>后续新增游戏时，只要继续往这个首页加卡片即可。</footer>
+</main>
+
+<!-- ========== 聊天侧边栏 ========== -->
+<div class="chat-overlay" id="chat-overlay" onclick="toggleChat()"></div>
+<div class="chat-drawer" id="chat-drawer">
+    <div class="chat-drawer-header">
+        <div>
+            <h2>匿名聊天</h2>
+            <span class="online-count" id="chat-online">未连接</span>
+        </div>
+        <button class="chat-close" onclick="toggleChat()">收起</button>
+    </div>
+
+    <!-- 未连接时的设置 -->
+    <div class="chat-setup" id="chat-setup">
+        <div class="row">
+            <label>昵称（留空自动生成）</label>
+            <input type="text" id="chat-nick" placeholder="匿名用户" maxlength="16">
+        </div>
+        <div class="row">
+            <button class="btn-success" onclick="chatCreateRoom()">创建房间</button>
+            <span style="flex:1"></span>
+            <span style="color:#666;font-size:12px">或加入</span>
+            <input type="number" id="chat-room-code" style="max-width:100px;text-align:center;letter-spacing:3px" placeholder="6位码" maxlength="6">
+            <button class="btn-warn" onclick="chatJoinCode()">加入</button>
+        </div>
+    </div>
+
+    <!-- 已连接后的界面 -->
+    <div class="chat-tabs" id="chat-tabs" style="display:none"></div>
+
+    <div class="chat-messages" id="chat-messages" style="display:none"></div>
+
+    <div class="chat-input-row" id="chat-input-row" style="display:none">
+        <input type="text" id="chat-msg" placeholder="输入消息..." maxlength="500"
+               onkeydown="if(event.key==='Enter')chatSend()">
+        <button onclick="chatSend()">发送</button>
+    </div>
+
+    <div class="chat-users" id="chat-users" style="display:none"></div>
+
+    <div class="chat-footer-btns" id="chat-footer" style="display:none">
+        <button onclick="chatLeave()">离开房间</button>
+    </div>
+</div>
+
+<script>
+// ===================================================================
+//  首页 - 预留游戏卡片
+// ===================================================================
+const futureGrid = document.getElementById('future-grid');
+const futureCount = 12;
+for (let i = 2; i < 2 + futureCount; i++) {
+    const card = document.createElement('article');
+    card.className = 'game-card locked';
+    card.innerHTML = `
+        <span class="tag soon">预留槽位</span>
+        <h2>游戏 ${String(i).padStart(2, '0')}</h2>
+        <p>这个位置留给之后的新游戏。当前还没有制作。</p>
+        <div class="placeholder-icon">${String(i).padStart(2, '0')}</div>
+        <div class="play-line"><span>目前未开放</span><span>---</span></div>
+    `;
+    futureGrid.appendChild(card);
+}
+
+// ===================================================================
+//  聊天抽屉开关
+// ===================================================================
+let chatOpen = false;
+function toggleChat() {
+    chatOpen = !chatOpen;
+    document.getElementById('chat-overlay').classList.toggle('open', chatOpen);
+    document.getElementById('chat-drawer').classList.toggle('open', chatOpen);
+    if (chatOpen) {
+        document.getElementById('global-unread').classList.remove('show');
+        const msgs = document.getElementById('chat-messages');
+        msgs.scrollTop = msgs.scrollHeight;
+    }
+}
+
+// ===================================================================
+//  聊天核心逻辑
+// ===================================================================
+const CPREFIX = 'chat-';
+const CNICKS = ['星辰','月光','迷途猫','夜行者','无名氏','影子','隐形人','路过','沉默者','路人甲','匿名者','空空','幽灵','浮云','夜风','旅人','回声','碎片'];
+
+let cPeer = null, cMyId = null, cMyName = '', cIsHost = false;
+let cConns = new Map();
+let cTab = null;
+let cUnread = {};
+let cHistory = {};
+let cTabEls = {};
+let cTotalUnread = 0;
+
+function cGenCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
+function cGenNick() { return CNICKS[Math.floor(Math.random() * CNICKS.length)]; }
+function cTime() { const d=new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+function cShort(id) { return id ? id.slice(-4).toUpperCase() : '????'; }
+function cGetName() { return document.getElementById('chat-nick').value.trim() || cGenNick(); }
+function cEsc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function cBumpGlobal() {
+    cTotalUnread++;
+    const el = document.getElementById('global-unread');
+    el.textContent = cTotalUnread;
+    if (!chatOpen) el.classList.add('show');
+}
+
+function cShowConnected() {
+    document.getElementById('chat-setup').style.display = 'none';
+    document.getElementById('chat-tabs').style.display = 'flex';
+    document.getElementById('chat-messages').style.display = 'block';
+    document.getElementById('chat-input-row').style.display = 'flex';
+    document.getElementById('chat-users').style.display = 'block';
+    document.getElementById('chat-footer').style.display = 'flex';
+}
+function cShowSetup() {
+    document.getElementById('chat-setup').style.display = 'block';
+    document.getElementById('chat-tabs').style.display = 'none';
+    document.getElementById('chat-messages').style.display = 'none';
+    document.getElementById('chat-input-row').style.display = 'none';
+    document.getElementById('chat-users').style.display = 'none';
+    document.getElementById('chat-footer').style.display = 'none';
+}
+
+// Tab
+function cAddPrivTab(targetId) {
+    const name = cConns.has(targetId) ? cConns.get(targetId).name : cShort(targetId);
+    if (cTabEls[targetId]) return;
+    cUnread[targetId] = 0;
+    cHistory[targetId] = [];
+    const tab = document.createElement('div');
+    tab.className = 'chat-tab';
+    tab.dataset.target = targetId;
+    tab.innerHTML = `${cEsc(name)}<span class="tab-unread" id="tu-${targetId}">0</span><span class="tab-close" data-close="${targetId}">x</span>`;
+    tab.onclick = (e) => {
+        if (e.target.dataset.close) { cClosePrivTab(e.target.dataset.close); return; }
+        cSwitchTab(targetId);
+    };
+    document.getElementById('chat-tabs').appendChild(tab);
+    cTabEls[targetId] = tab;
+}
+function cClosePrivTab(id) {
+    if (!cTabEls[id]) return;
+    cTabEls[id].remove(); delete cTabEls[id]; delete cUnread[id]; delete cHistory[id];
+    if (cTab === id) {
+        const keys = Object.keys(cTabEls);
+        cSwitchTab(keys.length > 0 ? keys[0] : null);
+    }
+}
+function cSwitchTab(target) {
+    cTab = target;
+    Object.values(cTabEls).forEach(t => t.classList.remove('active'));
+    if (cTabEls[target]) cTabEls[target].classList.add('active');
+    if (target) {
+        cUnread[target] = 0;
+        cRenderUnread(target);
+        cRender();
+    } else {
+        document.getElementById('chat-messages').innerHTML = '<div class="cm sys">选择一位用户开始私聊</div>';
+    }
+}
+function cRenderUnread(target) {
+    const el = document.getElementById(`tu-${target}`);
+    if (!el) return;
+    if (cUnread[target] > 0) { el.textContent = cUnread[target]; el.classList.add('show'); }
+    else el.classList.remove('show');
+}
+function cBumpUnread(target) {
+    if (cTab !== target) {
+        cUnread[target] = (cUnread[target]||0) + 1;
+        cRenderUnread(target);
+        cBumpGlobal();
+    }
+}
+
+// Messages
+function cRender() {
+    const el = document.getElementById('chat-messages');
+    const msgs = cHistory[cTab] || [];
+    el.innerHTML = '';
+    msgs.forEach(m => {
+        const div = document.createElement('div');
+        if (m.type === 'sys') { div.className = 'cm sys'; div.textContent = m.body; }
+        else {
+            const self = m.from === cMyId;
+            div.className = `cm ${self?'self':'other'} ${m.type==='priv'?'priv':''}`;
+            div.innerHTML = `<span class="cn">${cEsc(m.fromName||cShort(m.from))}</span><span class="ct">${m.time}</span><br><span class="cb">${cEsc(m.body)}</span>`;
+        }
+        el.appendChild(div);
+    });
+    el.scrollTop = el.scrollHeight;
+}
+function cAddMsg(target, from, fromName, body, type='pub') {
+    if (!cHistory[target]) cHistory[target] = [];
+    cHistory[target].push({ from, fromName, body, time: cTime(), type });
+    if (target === cTab) cRender();
+    else cBumpUnread(target);
+}
+
+// Users
+function cRenderUsers() {
+    const el = document.getElementById('chat-users');
+    el.innerHTML = '';
+    cConns.forEach((info, pid) => {
+        const self = pid === cMyId;
+        const div = document.createElement('div');
+        div.className = 'chat-user';
+        div.innerHTML = `<span><span class="cu-name">${cEsc(info.name)}</span><span class="cu-id">#${cShort(pid)}</span>${self?'<span class="cu-self">(你)</span>':''}</span>${self?'':'<button class="cu-pm" data-pm="'+pid+'">私聊</button>'}`;
+        const btn = div.querySelector('.cu-pm');
+        if (btn) btn.onclick = () => { cAddPrivTab(pid); cSwitchTab(pid); };
+        el.appendChild(div);
+    });
+    document.getElementById('chat-online').textContent = `在线：${cConns.size}`;
+}
+
+// Peer
+function cDestroy() {
+    if (cPeer) { cPeer.destroy(); cPeer = null; }
+    cMyId = null; cIsHost = false; cConns.clear();
+}
+function cSendOrRelay(targetPid, payload) {
+    if (targetPid === cMyId) return;
+    const msg = JSON.stringify(payload);
+    if (cIsHost) { const info = cConns.get(targetPid); if (info && info.conn && info.conn.open) info.conn.send(msg); }
+    else {
+        const h = cConns.get('__host__');
+        if (h && h.conn && h.conn.open) h.conn.send(JSON.stringify({ type:'relay', to:targetPid, from:cMyId, payload: typeof payload==='string'?JSON.parse(payload):payload }));
+    }
+}
+function cHandleMsg(data, fromPid) {
+    const msg = typeof data === 'string' ? JSON.parse(data) : data;
+    if (msg.type === 'join') {
+        const name = msg.name || '匿名';
+        cConns.set(fromPid, { conn: cConns.get(fromPid)?.conn, name, id: fromPid });
+        cRenderUsers();
+        if (cIsHost) {
+            // 通知其他已有用户
+            cConns.forEach((info, pid) => {
+                if (pid !== cMyId && pid !== fromPid && info.conn && info.conn.open) {
+                    info.conn.send(JSON.stringify({ type:'user-joined', peerId:fromPid, name }));
+                }
+            });
+            const ul = []; cConns.forEach((info,pid) => ul.push({peerId:pid,name:info.name}));
+            const w = cConns.get(fromPid); if (w&&w.conn&&w.conn.open) w.conn.send(JSON.stringify({type:'user-list',users:ul}));
+        }
+        return;
+    }
+    if (msg.type === 'user-joined' && !cIsHost) {
+        cConns.set(msg.peerId, { conn:cConns.get(msg.peerId)?.conn, name:msg.name, id:msg.peerId });
+        cRenderUsers();
+        return;
+    }
+    if (msg.type === 'user-list' && !cIsHost) {
+        msg.users.forEach(u => { if (u.peerId !== cMyId) cConns.set(u.peerId, { conn:cConns.get(u.peerId)?.conn, name:u.name, id:u.peerId }); });
+        cRenderUsers(); return;
+    }
+    if (msg.type === 'leave') {
+        const name = cConns.has(fromPid) ? cConns.get(fromPid).name : '某人';
+        cConns.delete(fromPid); cClosePrivTab(fromPid); cRenderUsers();
+        return;
+    }
+    if (msg.type === 'chat') {
+        const fn = cConns.has(fromPid) ? cConns.get(fromPid).name : cShort(fromPid);
+        const target = msg.target;
+        if (target === cMyId || fromPid === cMyId) cAddMsg(fromPid, fromPid, fn, msg.body, 'priv');
+        return;
+    }
+    if (msg.type === 'relay') {
+        if (cIsHost) { const tc=cConns.get(msg.to); if(tc&&tc.conn&&tc.conn.open) tc.conn.send(JSON.stringify(msg.payload)); }
+        else cHandleMsg(msg.payload, msg.from);
+    }
+}
+function cBindConn(conn, pid) {
+    conn.on('data', data => cHandleMsg(data, pid));
+    conn.on('close', () => {
+        if (cConns.has(pid) && pid !== cMyId) {
+            const name = cConns.get(pid)?.name || '某人';
+            cConns.delete(pid); cClosePrivTab(pid); cRenderUsers();
+        }
+    });
+}
+
+function chatCreateRoom() {
+    cDestroy(); cIsHost = true; cMyName = cGetName();
+    cPeer = new Peer(CPREFIX + cGenCode(), { debug: 0 });
+    cPeer.on('open', id => {
+        cMyId = id;
+        cConns.set(cMyId, { conn:null, name:cMyName, id:cMyId });
+        cShowConnected();
+        const msgs = document.getElementById('chat-messages');
+        msgs.innerHTML = `<div class="cm sys">房间已创建，房间码：${id.replace(CPREFIX,'')}</div><div class="cm sys">你的昵称：${cMyName}</div><div class="cm sys">等待对方加入...</div>`;
+        cRenderUsers();
+    });
+    cPeer.on('connection', conn => { cBindConn(conn, conn.peer); });
+    cPeer.on('error', err => console.error(err));
+}
+
+function chatJoinCode() {
+    const code = document.getElementById('chat-room-code').value.trim();
+    if (!/^\d{6}$/.test(code)) { alert('请输入 6 位数字房间码'); return; }
+    cJoinRoom(code);
+}
+
+function cJoinRoom(code) {
+    cDestroy(); cIsHost = false; cMyName = cGetName();
+    cPeer = new Peer(undefined, { debug: 0 });
+    cPeer.on('open', id => {
+        cMyId = id;
+        const conn = cPeer.connect(CPREFIX + code, { reliable: true });
+        conn.on('open', () => {
+            cConns.set('__host__', { conn, name:'房主', id:code });
+            cConns.set(cMyId, { conn:null, name:cMyName, id:cMyId });
+            cBindConn(conn, '__host__');
+            cShowConnected();
+            conn.send(JSON.stringify({ type:'join', name:cMyName }));
+            // 自动打开和房主的私聊 tab
+            cAddPrivTab('__host__');
+            cSwitchTab('__host__');
+            const msgs = document.getElementById('chat-messages');
+            msgs.innerHTML = `<div class="cm sys">已加入房间 ${code}</div><div class="cm sys">你的昵称：${cMyName}</div>`;
+            cRenderUsers();
+        });
+        conn.on('error', () => alert('连接失败：房间不存在或已关闭'));
+    });
+    cPeer.on('error', err => console.error(err));
+}
+
+function cCreateWithCode(code) {
+    cDestroy(); cIsHost = true; cMyName = cGetName();
+    cPeer = new Peer(CPREFIX + code, { debug: 0 });
+    cPeer.on('open', id => {
+        cMyId = id; cConns.set(cMyId, { conn:null, name:cMyName, id:cMyId });
+        cShowConnected();
+        const msgs = document.getElementById('chat-messages');
+        msgs.innerHTML = `<div class="cm sys">房间 ${code} 已创建（无人，你是房主）</div><div class="cm sys">你的昵称：${cMyName}</div><div class="cm sys">等待对方加入...</div>`;
+        cRenderUsers();
+    });
+    cPeer.on('connection', conn => { cBindConn(conn, conn.peer); });
+    cPeer.on('error', err => console.error(err));
+}
+
+function chatSend() {
+    if (!cTab) return;
+    const input = document.getElementById('chat-msg');
+    const body = input.value.trim(); if (!body) return; input.value = '';
+    const payload = { type:'chat', body, chatType: 'priv', target: cTab };
+    cAddMsg(cTab, cMyId, cMyName, body, 'priv');
+    cSendOrRelay(cTab, payload);
+}
+
+function chatLeave() {
+    if (cIsHost) {
+        cConns.forEach((info, pid) => { if (pid !== cMyId && info.conn && info.conn.open) info.conn.send(JSON.stringify({type:'leave',peerId:cMyId})); });
+    }
+    cDestroy(); cShowSetup();
+    cTab = null; cHistory = {}; cUnread = {}; cTotalUnread = 0;
+    Object.keys(cTabEls).forEach(k => cClosePrivTab(k));
+    document.getElementById('chat-messages').innerHTML = '';
+    document.getElementById('chat-online').textContent = '未连接';
+    document.getElementById('global-unread').classList.remove('show');
+}
+
+// 加载外部更新日志
+fetch('./changelog.txt')
+    .then(r => r.ok ? r.text() : '')
+    .then(text => {
+        const body = document.getElementById('log-body');
+        const badge = document.getElementById('log-badge');
+        if (!text.trim()) { body.innerHTML = '暂无更新记录'; badge.textContent = '0'; return; }
+        const sections = [];
+        let current = null;
+        text.split('\n').forEach(line => {
+            line = line.trim();
+            if (!line) {
+                if (current && current.items.length) { sections.push(current); current = null; }
+                return;
+            }
+            // 项目标题行：项目名 | 日期  或  日期 | 标题
+            if (line.includes('|') && !line.startsWith('new|') && !line.startsWith('fix|') && !line.startsWith('change|')) {
+                const parts = line.split('|');
+                const first = parts[0].trim();
+                const second = parts[1]?.trim() || '';
+                // 如果第一部分像日期，当作旧格式：日期 | 标题
+                if (/\d{4}\.\d{2}/.test(first)) {
+                    if (current && current.items.length) { sections.push(current); }
+                    current = { name: second || first, date: first, items: [] };
+                    return;
+                }
+                // 新格式：项目名 | 日期
+                if (current && current.items.length) { sections.push(current); }
+                current = { name: first, date: second, items: [] };
+                return;
+            }
+            // 条目内容
+            if (current && line.includes('|')) {
+                const parts = line.split('|');
+                const type = parts[0]?.trim();
+                const desc = parts[1]?.trim();
+                if (type && desc) current.items.push({ type, desc });
+            }
+        });
+        if (current && current.items.length) sections.push(current);
+        badge.textContent = sections.length;
+        body.innerHTML = sections.map(s => `
+            <details class="log-entry">
+                <summary><strong>${s.name}</strong><span class="log-date-tag">${s.date}</span></summary>
+                <ul>${s.items.map(i => `<li class="${i.type}">${i.desc}</li>`).join('')}</ul>
+            </details>
+        `).join('');
+    })
+    .catch(() => {
+        document.getElementById('log-body').innerHTML = '加载失败';
+        document.getElementById('log-badge').textContent = '0';
+    });
+</script>
+</body>
+</html>
