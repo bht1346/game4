@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>三子棋</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:'Courier New',Courier,monospace;
+  min-height:100vh;padding:28px;line-height:1.6;
+  background:radial-gradient(ellipse at 15% 0%,rgba(255,200,0,.18),transparent 45%),
+             radial-gradient(ellipse at 85% 100%,rgba(200,150,0,.1),transparent 40%),#111;
+  color:#ddd;
+}
+#app{max-width:600px;margin:0 auto;text-align:center;position:relative}
+
+/* 标题 */
+h1{font-size:36px;letter-spacing:6px;font-weight:normal;color:#ffcc00;text-shadow:0 0 22px rgba(255,204,0,.18);margin-bottom:8px}
+h2{font-size:14px;letter-spacing:2px;font-weight:normal;opacity:.7;margin-bottom:40px}
+
+/* 菜单卡片 */
+.cards{display:flex;gap:24px;justify-content:center;flex-wrap:wrap;margin-bottom:40px}
+.card{
+  width:220px;height:160px;border:1px solid #665522;border-radius:16px;
+  cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  background:linear-gradient(145deg,#151515,#0f0f0f);box-shadow:0 0 26px rgba(0,0,0,.55);
+  position:relative;overflow:hidden;transition:transform .18s,border-color .18s,box-shadow .18s;
+}
+.card::before{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(120deg,transparent,rgba(255,255,255,.05),transparent);
+  transform:translateX(-120%);transition:transform .5s;
+}
+.card:hover::before{transform:translateX(120%)}
+.card:hover{transform:translateY(-4px);border-color:#ffcc00;box-shadow:0 0 28px rgba(255,204,0,.14)}
+.card .icon{font-size:40px}
+.card .label{font-size:16px;letter-spacing:2px}
+
+/* 设置 */
+.settings-btn{
+  position:absolute;top:20px;right:20px;font-size:13px;cursor:pointer;z-index:10;
+  border:1px solid #555;border-radius:4px;padding:4px 10px;background:transparent;color:#ddd;transition:all .2s;
+}
+.settings-btn:hover{border-color:#ffcc00;color:#ffcc00}
+.tp{
+  position:absolute;top:50px;right:20px;border:1px solid #555;border-radius:8px;
+  padding:12px 14px;z-index:100;min-width:180px;display:none;background:#1a1a1a;
+}
+.tp.open{display:block}
+.tp label{display:block;font-size:12px;margin-bottom:6px;opacity:.7}
+.tp .opt{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;cursor:pointer;font-size:13px;transition:background .15s}
+.tp .opt:hover{background:rgba(255,204,0,.08)}
+.sw{width:14px;height:14px;border-radius:50%;border:2px solid #555}
+.td{height:1px;background:#333;margin:8px 0}
+
+/* 返回首页 */
+.back-link{
+  display:inline-block;margin-top:30px;font-size:13px;letter-spacing:2px;
+  text-decoration:none;padding:6px 18px;border:1px solid #665522;border-radius:8px;color:#ddd;
+  transition:opacity .2s,border-color .2s,box-shadow .2s;
+}
+.back-link:hover{opacity:1;border-color:#ffcc00;box-shadow:0 0 14px rgba(255,204,0,.12)}
+
+/* 游戏界面 */
+#gameView{display:none}
+.game-info{font-size:22px;letter-spacing:3px;margin:12px 0 6px;color:#ffcc00;text-shadow:0 0 16px rgba(255,204,0,.18);min-height:32px}
+.extra-info{font-size:13px;letter-spacing:1px;color:#888;margin-bottom:6px;min-height:20px}
+.score-board{font-size:15px;letter-spacing:1px;margin-bottom:16px;color:#aaa}
+
+/* 按钮 */
+.btn{
+  font-family:'Courier New',monospace;font-size:14px;letter-spacing:2px;
+  padding:10px 28px;border:1px solid #665522;border-radius:8px;
+  background:linear-gradient(145deg,#151515,#0f0f0f);color:#ddd;cursor:pointer;
+  transition:transform .15s,box-shadow .15s,border-color .15s;margin:4px;
+}
+.btn:hover{transform:translateY(-2px);border-color:#ffcc00;box-shadow:0 0 14px rgba(255,204,0,.12)}
+
+/* ========== 棋盘：纯 CSS Grid ========== */
+.board{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  grid-template-rows:repeat(3,1fr);
+  width:360px;height:360px;
+  margin:0 auto 16px;
+  border:2px solid #998844;
+  border-radius:8px;
+  background:#111;
+  box-shadow:0 0 20px rgba(153,136,68,.15);
+}
+.cell{
+  display:flex;align-items:center;justify-content:center;
+  font-size:48px;font-weight:bold;
+  cursor:pointer;
+  border:1px solid #998844;
+  transition:background .15s;
+  user-select:none;
+  -webkit-user-select:none;
+}
+.cell:hover{background:rgba(255,204,0,.06)}
+.cell .x{color:#ffcc00;text-shadow:0 0 12px rgba(255,204,0,.3)}
+.cell .o{color:#eee;text-shadow:0 0 8px rgba(255,255,255,.15)}
+.cell.win-cell{background:rgba(255,204,0,.15);box-shadow:inset 0 0 20px rgba(255,204,0,.1)}
+
+/* 获胜弹窗 */
+.overlay{
+  position:fixed;top:0;left:0;right:0;bottom:0;
+  display:flex;align-items:center;justify-content:center;z-index:100;
+  background:rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .3s;
+}
+.overlay.show{opacity:1;pointer-events:auto}
+.win-box{padding:40px 60px;border:2px solid #ffcc00;border-radius:16px;text-align:center;background:#111}
+.win-text{font-size:28px;letter-spacing:4px;margin-bottom:20px;color:#ffcc00}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="settings-btn" onclick="toggleSettings()">设置</div>
+  <div class="tp" id="tp">
+    <label>主题颜色</label>
+    <div class="opt" onclick="setTheme('gold')"><span class="sw" style="background:linear-gradient(135deg,#0a0a0a,#333)"></span> 黑金</div>
+    <div class="opt" onclick="setTheme('blue')"><span class="sw" style="background:linear-gradient(135deg,#f0f4f8,#b8d4f0)"></span> 蔚蓝</div>
+    <div class="td"></div>
+    <label>背景风格</label>
+    <div class="opt" onclick="setBg('gradient')">渐变</div>
+    <div class="opt" onclick="setBg('solid')">纯色</div>
+  </div>
+
+  <!-- 菜单 -->
+  <div id="menuView">
+    <h1>三子棋</h1>
+    <h2>每人只有三子，下第四子时第一个子消失</h2>
+    <div class="cards">
+      <div class="card" onclick="startAI()">
+        <div class="icon">🤖</div>
+        <div class="label">人机对战</div>
+      </div>
+      <div class="card" onclick="location.href='./p2p-tictactoe.html'">
+        <div class="icon">🌐</div>
+        <div class="label">联机对战</div>
+      </div>
+    </div>
+    <a class="back-link" href="./../index.html">返回首页</a>
+  </div>
+
+  <!-- 游戏 -->
+  <div id="gameView">
+    <h1>三子棋</h1>
+    <div class="board" id="board"></div>
+    <div class="game-info" id="info"></div>
+    <div class="extra-info" id="extra"></div>
+    <div class="score-board" id="score"></div>
+    <div>
+      <button class="btn" onclick="restart()">重新开始</button>
+      <button class="btn" onclick="backToMenu()">返回菜单</button>
+    </div>
+  </div>
+
+  <!-- 获胜弹窗 -->
+  <div class="overlay" id="overlay">
+    <div class="win-box">
+      <div class="win-text" id="winText"></div>
+      <button class="btn" onclick="restart()">再来一局</button>
+      <button class="btn" onclick="backToMenu()">返回菜单</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ==================== 状态 ====================
+var grid = [];      // 3x3 数组，每个元素：null / 'x' / 'o'
+var moves = [];     // 所有落子记录 [{r,c,who}]
+var turn = 'x';     // 'x' = 玩家, 'o' = AI
+var ended = false;
+var winLine = null;
+var totalScore = {x:0, o:0};
+var aiWorking = false;
+
+// ==================== 初始化棋盘 DOM ====================
+function buildBoard() {
+  var el = document.getElementById('board');
+  el.innerHTML = '';
+  for (var r = 0; r < 3; r++) {
+    for (var c = 0; c < 3; c++) {
+      var cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.r = r;
+      cell.dataset.c = c;
+      cell.addEventListener('click', onCellClick);
+      el.appendChild(cell);
+    }
+  }
+}
+
+function clearBoard() {
+  grid = [[null,null,null],[null,null,null],[null,null,null]];
+  moves = [];
+  turn = 'x';
+  ended = false;
+  winLine = null;
+  aiWorking = false;
+  var cells = document.querySelectorAll('.cell');
+  for (var i = 0; i < cells.length; i++) {
+    cells[i].innerHTML = '';
+    cells[i].classList.remove('win-cell');
+  }
+}
+
+// ==================== 获取 DOM 格子 ====================
+function getCell(r, c) {
+  return document.querySelector('.cell[data-r="'+r+'"][data-c="'+c+'"]');
+}
+
+// ==================== 点击格子 ====================
+function onCellClick(e) {
+  if (ended || aiWorking || turn !== 'x') return;
+  var r = parseInt(this.dataset.r);
+  var c = parseInt(this.dataset.c);
+  if (grid[r][c] !== null) return;
+  doMove(r, c, 'x');
+}
+
+// ==================== 落子 ====================
+function doMove(r, c, who) {
+  if (ended || grid[r][c] !== null) return false;
+
+  // 超过3子，循环移除最老的直到只剩3个（防御性）
+  var mine = [];
+  for (var rr = 0; rr < 3; rr++) {
+    for (var cc = 0; cc < 3; cc++) {
+      if (grid[rr][cc] === who) mine.push({r: rr, c: cc});
+    }
+  }
+  while (mine.length >= 3) {
+    var oldest = null;
+    for (var i = 0; i < moves.length; i++) {
+      if (moves[i].who === who) { oldest = moves[i]; break; }
+    }
+    if (!oldest) break;
+    grid[oldest.r][oldest.c] = null;
+    var oldCell = getCell(oldest.r, oldest.c);
+    if (oldCell) oldCell.innerHTML = '';
+    for (var i = 0; i < moves.length; i++) {
+      if (moves[i] === oldest) { moves.splice(i, 1); break; }
+    }
+    mine = [];
+    for (var rr = 0; rr < 3; rr++) {
+      for (var cc = 0; cc < 3; cc++) {
+        if (grid[rr][cc] === who) mine.push({r: rr, c: cc});
+      }
+    }
+  }
+
+  grid[r][c] = who;
+  moves.push({r:r, c:c, who:who});
+
+  // 更新格子显示
+  var cell = getCell(r, c);
+  if (cell) {
+    var span = document.createElement('span');
+    span.className = (who === 'x') ? 'x' : 'o';
+    span.textContent = (who === 'x') ? '✕' : '○';
+    cell.innerHTML = '';
+    cell.appendChild(span);
+  }
+
+  // 检查获胜
+  var wl = checkWin(who);
+  if (wl) {
+    ended = true;
+    winLine = wl;
+    totalScore[who]++;
+    for (var i = 0; i < wl.length; i++) {
+      var wc = getCell(wl[i][0], wl[i][1]);
+      if (wc) wc.classList.add('win-cell');
+    }
+    refreshUI();
+    setTimeout(function() {
+      document.getElementById('winText').textContent = (who === 'x' ? '玩家' : 'AI') + ' 获胜!';
+      document.getElementById('overlay').classList.add('show');
+    }, 300);
+    return true;
+  }
+
+  // 切换回合
+  turn = (who === 'x') ? 'o' : 'x';
+  refreshUI();
+
+  // AI
+  if (turn === 'o' && !ended) {
+    aiWorking = true;
+    refreshUI();
+    setTimeout(function() {
+      aiPlay();
+      aiWorking = false;
+    }, 350);
+  }
+  return true;
+}
+
+// ==================== 获胜检测 ====================
+var LINES = [
+  [[0,0],[0,1],[0,2]], [[1,0],[1,1],[1,2]], [[2,0],[2,1],[2,2]],
+  [[0,0],[1,0],[2,0]], [[0,1],[1,1],[2,1]], [[0,2],[1,2],[2,2]],
+  [[0,0],[1,1],[2,2]], [[0,2],[1,1],[2,0]]
+];
+
+function checkWin(who) {
+  for (var i = 0; i < LINES.length; i++) {
+    var l = LINES[i];
+    if (grid[l[0][0]][l[0][1]] === who &&
+        grid[l[1][0]][l[1][1]] === who &&
+        grid[l[2][0]][l[2][1]] === who) {
+      return l;
+    }
+  }
+  return null;
+}
+
+// ==================== AI ====================
+function aiPlay() {
+  if (ended) return;
+  // 1. 能赢就赢
+  var s = findSpot('o');
+  if (s) { doMove(s[0], s[1], 'o'); return; }
+  // 2. 堵玩家
+  var b = findSpot('x');
+  if (b) { doMove(b[0], b[1], 'o'); return; }
+  // 3. 中心
+  if (grid[1][1] === null) { doMove(1, 1, 'o'); return; }
+  // 4. 角
+  var corners = [[0,0],[0,2],[2,0],[2,2]];
+  var ec = [];
+  for (var i = 0; i < 4; i++) if (grid[corners[i][0]][corners[i][1]] === null) ec.push(corners[i]);
+  if (ec.length) { var p = ec[Math.floor(Math.random()*ec.length)]; doMove(p[0],p[1],'o'); return; }
+  // 5. 随机
+  var all = [];
+  for (var r = 0; r < 3; r++) for (var c = 0; c < 3; c++) if (grid[r][c]===null) all.push([r,c]);
+  if (all.length) { var p = all[Math.floor(Math.random()*all.length)]; doMove(p[0],p[1],'o'); }
+}
+
+function findSpot(who) {
+  for (var r = 0; r < 3; r++) {
+    for (var c = 0; c < 3; c++) {
+      if (grid[r][c] !== null) continue;
+      // 模拟
+      grid[r][c] = who;
+      var wl = checkWin(who);
+      grid[r][c] = null;
+      if (wl) return [r, c];
+    }
+  }
+  return null;
+}
+
+// ==================== UI ====================
+function refreshUI() {
+  var info = document.getElementById('info');
+  var extra = document.getElementById('extra');
+  var score = document.getElementById('score');
+
+  if (ended) {
+    var w = winLine ? grid[winLine[0][0]][winLine[0][1]] : null;
+    info.textContent = w ? ((w === 'x' ? '玩家' : 'AI') + ' 获胜!') : '平局!';
+    extra.textContent = '';
+  } else if (aiWorking) {
+    info.textContent = '当前回合: AI';
+    extra.textContent = 'AI 正在思考...';
+  } else {
+    info.textContent = '当前回合: 玩家';
+    var cnt = 0;
+    for (var r = 0; r < 3; r++) for (var c = 0; c < 3; c++) if (grid[r][c]==='x') cnt++;
+    extra.textContent = '玩家 已下 ' + cnt + '/3 子' + (cnt >= 3 ? '  (再下一颗最早的子会消失)' : '');
+  }
+  score.textContent = '总局分  玩家 ' + totalScore.x + ' : ' + totalScore.o + ' AI';
+}
+
+// ==================== 界面切换 ====================
+function startAI() {
+  totalScore = {x:0, o:0};
+  document.getElementById('menuView').style.display = 'none';
+  document.getElementById('gameView').style.display = 'block';
+  clearBoard();
+  refreshUI();
+}
+
+function restart() {
+  document.getElementById('overlay').classList.remove('show');
+  clearBoard();
+  refreshUI();
+}
+
+function backToMenu() {
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('gameView').style.display = 'none';
+  document.getElementById('menuView').style.display = 'block';
+  totalScore = {x:0, o:0};
+}
+
+// ==================== 主题 ====================
+// 蔚蓝主题颜色配置
+var AZURE = {
+  bodyBg:       'radial-gradient(ellipse at 15% 0%,rgba(100,200,255,.2),transparent 45%),radial-gradient(ellipse at 85% 100%,rgba(60,160,240,.12),transparent 40%),#d1f0ff',
+  bodyBgSolid:  '#d1f0ff',
+  textColor:    '#1a3a5c',
+  accent:       '#0077cc',
+  accentGlow:   'rgba(0,119,204,.15)',
+  accentHover:  'rgba(0,119,204,.08)',
+  cardBg:       'linear-gradient(145deg,#e8f6ff,#d8eeff)',
+  cardBorder:   '#88ccee',
+  cardHoverBorder: '#0077cc',
+  cardHoverShadow: 'rgba(0,119,204,.16)',
+  boardBg:      '#e0f2ff',
+  boardBorder:  '#66aadd',
+  cellBorder:   '#66aadd',
+  cellHover:    'rgba(0,119,204,.06)',
+  btnBg:        'linear-gradient(145deg,#e8f6ff,#d8eeff)',
+  btnBorder:    '#88ccee',
+  btnHoverBorder: '#0077cc',
+  btnHoverShadow: 'rgba(0,119,204,.14)',
+  backLinkBorder: '#88ccee',
+  backLinkHoverBorder: '#0077cc',
+  backLinkHoverShadow: 'rgba(0,119,204,.14)',
+  infoColor:    '#0077cc',
+  infoShadow:   'rgba(0,119,204,.15)',
+  extraColor:   '#4477aa',
+  scoreColor:   '#336699',
+  subtitleColor: '#4477aa',
+  xColor:       '#0077cc',
+  xShadow:      'rgba(0,119,204,.3)',
+  oColor:       '#cc4400',
+  oShadow:      'rgba(204,68,0,.2)',
+  winCellBg:    'rgba(0,119,204,.12)',
+  winCellShadow: 'inset 0 0 20px rgba(0,119,204,.08)',
+  winBoxBg:     '#e0f2ff',
+  winBoxBorder: '#0077cc',
+  winTextColor: '#0077cc',
+  tpBg:         '#e8f6ff',
+  tpBorder:     '#88ccee',
+  settingsBtnColor: '#4477aa',
+  settingsBtnBorder: '#88ccee',
+  settingsBtnHover: '#0077cc',
+  cellHoverColor: 'rgba(0,119,204,.06)',
+};
+
+// 黑金主题颜色配置
+var BLACKGOLD = {
+  bodyBg:       'radial-gradient(ellipse at 15% 0%,rgba(255,200,0,.18),transparent 45%),radial-gradient(ellipse at 85% 100%,rgba(200,150,0,.1),transparent 40%),#111',
+  bodyBgSolid:  '#111',
+  textColor:    '#ddd',
+  accent:       '#ffcc00',
+  accentGlow:   'rgba(255,204,0,.18)',
+  accentHover:  'rgba(255,204,0,.08)',
+  cardBg:       'linear-gradient(145deg,#151515,#0f0f0f)',
+  cardBorder:   '#665522',
+  cardHoverBorder: '#ffcc00',
+  cardHoverShadow: 'rgba(255,204,0,.14)',
+  boardBg:      '#111',
+  boardBorder:  '#998844',
+  cellBorder:   '#998844',
+  cellHover:    'rgba(255,204,0,.06)',
+  btnBg:        'linear-gradient(145deg,#151515,#0f0f0f)',
+  btnBorder:    '#665522',
+  btnHoverBorder: '#ffcc00',
+  btnHoverShadow: 'rgba(255,204,0,.12)',
+  backLinkBorder: '#665522',
+  backLinkHoverBorder: '#ffcc00',
+  backLinkHoverShadow: 'rgba(255,204,0,.12)',
+  infoColor:    '#ffcc00',
+  infoShadow:   'rgba(255,204,0,.18)',
+  extraColor:   '#888',
+  scoreColor:   '#aaa',
+  subtitleColor: 'rgba(255,255,255,.7)',
+  xColor:       '#ffcc00',
+  xShadow:      'rgba(255,204,0,.3)',
+  oColor:       '#eee',
+  oShadow:      'rgba(255,255,255,.15)',
+  winCellBg:    'rgba(255,204,0,.15)',
+  winCellShadow: 'inset 0 0 20px rgba(255,204,0,.1)',
+  winBoxBg:     '#111',
+  winBoxBorder: '#ffcc00',
+  winTextColor: '#ffcc00',
+  tpBg:         '#1a1a1a',
+  tpBorder:     '#555',
+  settingsBtnColor: '#ddd',
+  settingsBtnBorder: '#555',
+  settingsBtnHover: '#ffcc00',
+  cellHoverColor: 'rgba(255,204,0,.06)',
+};
+
+function getColors() {
+  var t = localStorage.getItem('theme') || 'gold';
+  return t === 'blue' ? AZURE : BLACKGOLD;
+}
+
+function applyTheme() {
+  var c = getColors();
+  var bgStyle = localStorage.getItem('bgStyle') || 'gradient';
+
+  // 背景
+  document.body.style.background = (bgStyle === 'solid') ? c.bodyBgSolid : c.bodyBg;
+  document.body.style.color = c.textColor;
+
+  // 标题
+  var h1s = document.querySelectorAll('h1');
+  for (var i = 0; i < h1s.length; i++) {
+    h1s[i].style.color = c.accent;
+    h1s[i].style.textShadow = '0 0 22px ' + c.accentGlow;
+  }
+  var h2s = document.querySelectorAll('h2');
+  for (var i = 0; i < h2s.length; i++) {
+    h2s[i].style.color = c.subtitleColor;
+  }
+
+  // 卡片
+  var cards = document.querySelectorAll('.card');
+  for (var i = 0; i < cards.length; i++) {
+    cards[i].style.background = c.cardBg;
+    cards[i].style.borderColor = c.cardBorder;
+  }
+
+  // 棋盘
+  var board = document.querySelector('.board');
+  if (board) {
+    board.style.borderColor = c.boardBorder;
+    board.style.background = c.boardBg;
+    board.style.boxShadow = '0 0 20px ' + c.accentGlow;
+  }
+  var cells = document.querySelectorAll('.cell');
+  for (var i = 0; i < cells.length; i++) {
+    cells[i].style.borderColor = c.cellBorder;
+  }
+
+  // 按钮
+  var btns = document.querySelectorAll('.btn');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].style.background = c.btnBg;
+    btns[i].style.borderColor = c.btnBorder;
+    btns[i].style.color = c.textColor;
+  }
+
+  // 返回首页链接
+  var bl = document.querySelector('.back-link');
+  if (bl) {
+    bl.style.borderColor = c.backLinkBorder;
+    bl.style.color = c.textColor;
+  }
+
+  // 游戏信息
+  var gi = document.querySelector('.game-info');
+  if (gi) {
+    gi.style.color = c.infoColor;
+    gi.style.textShadow = '0 0 16px ' + c.infoShadow;
+  }
+  var ei = document.querySelector('.extra-info');
+  if (ei) ei.style.color = c.extraColor;
+  var sb = document.querySelector('.score-board');
+  if (sb) sb.style.color = c.scoreColor;
+
+  // 棋子颜色（通过 CSS 变量）- 更新 style 标签
+  var styleEl = document.getElementById('theme-dynamic');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'theme-dynamic';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = [
+    '.cell .x{color:' + c.xColor + ';text-shadow:0 0 12px ' + c.xShadow + '}',
+    '.cell .o{color:' + c.oColor + ';text-shadow:0 0 8px ' + c.oShadow + '}',
+    '.cell.win-cell{background:' + c.winCellBg + ';box-shadow:' + c.winCellShadow + '}',
+    '.cell:hover{background:' + c.cellHoverColor + '}',
+    '.card:hover{border-color:' + c.cardHoverBorder + ';box-shadow:0 0 28px ' + c.cardHoverShadow + '}',
+    '.btn:hover{border-color:' + c.btnHoverBorder + ';box-shadow:0 0 14px ' + c.btnHoverShadow + '}',
+    '.back-link:hover{border-color:' + c.backLinkHoverBorder + ';box-shadow:0 0 14px ' + c.backLinkHoverShadow + '}',
+    '.settings-btn:hover{border-color:' + c.settingsBtnHover + ';color:' + c.settingsBtnHover + '}',
+    '.tp .opt:hover{background:' + c.accentHover + '}',
+    '.win-box{background:' + c.winBoxBg + ';border-color:' + c.winBoxBorder + '}',
+    '.win-text{color:' + c.winTextColor + '}',
+  ].join('\n');
+
+  // 设置按钮
+  var sbtn = document.querySelector('.settings-btn');
+  if (sbtn) {
+    sbtn.style.color = c.settingsBtnColor;
+    sbtn.style.borderColor = c.settingsBtnBorder;
+  }
+  // 设置面板
+  var tp = document.getElementById('tp');
+  if (tp) {
+    tp.style.background = c.tpBg;
+    tp.style.borderColor = c.tpBorder;
+  }
+  // 面板内文字
+  var opts = document.querySelectorAll('.tp .opt');
+  for (var i = 0; i < opts.length; i++) {
+    opts[i].style.color = c.textColor;
+  }
+  var labels = document.querySelectorAll('.tp label');
+  for (var i = 0; i < labels.length; i++) {
+    labels[i].style.color = c.extraColor;
+  }
+}
+
+function setTheme(t) {
+  localStorage.setItem('theme', t);
+  applyTheme();
+}
+function setBg(s) {
+  localStorage.setItem('bgStyle', s);
+  applyTheme();
+}
+var so = false;
+function toggleSettings() {
+  so = !so;
+  document.getElementById('tp').classList.toggle('open', so);
+}
+document.addEventListener('click', function(e) {
+  if (so && !e.target.closest('#tp') && !e.target.closest('.settings-btn')) {
+    so = false;
+    document.getElementById('tp').classList.remove('open');
+  }
+});
+
+// ==================== 启动 ====================
+buildBoard();
+clearBoard();
+applyTheme();
+refreshUI();
+</script>
+
+
+</body></html>
