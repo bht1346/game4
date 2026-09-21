@@ -554,7 +554,7 @@
 
     <section class="stats">
         <div class="stat">
-            <strong>1</strong>
+            <strong>2</strong>
             <span>已加入游戏</span>
         </div>
         <div class="stat">
@@ -573,6 +573,16 @@
             <span class="tag">第 1 个游戏</span>
             <h2>恶魔轮盘赌</h2>
             <p>数学老师特供版。包含普通模式、无限模式、联机模式入口，以及娱乐用人机验证。</p>
+            <div class="play-line">
+                <span>点击开始</span>
+                <span class="arrow">→</span>
+            </div>
+        </article>
+
+        <article class="game-card enabled" onclick="location.href='./02/2026.07.06-2026.09.19/game-tictactoe.html'">
+            <span class="tag">第 2 个游戏</span>
+            <h2>三子棋</h2>
+            <p>3×3 棋盘，每人只有三枚棋子，下第四子时最早那枚会自动消失。支持人机对战与联机对战，先把三子连成横、竖或斜线者获胜。</p>
             <div class="play-line">
                 <span>点击开始</span>
                 <span class="arrow">→</span>
@@ -636,7 +646,7 @@
 // ===================================================================
 const futureGrid = document.getElementById('future-grid');
 const futureCount = 12;
-for (let i = 2; i < 2 + futureCount; i++) {
+for (let i = 3; i < 3 + futureCount; i++) {
     const card = document.createElement('article');
     card.className = 'game-card locked';
     card.innerHTML = `
