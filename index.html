@@ -569,7 +569,7 @@
 
     <h2 class="section-title">选择游戏</h2>
     <section class="game-grid" id="game-grid">
-        <article class="game-card enabled" onclick="location.href='./01/2026.06.20-07.14/game-buckshot.html'">
+        <article class="game-card enabled" onclick="goGame('./01/2026.06.20-07.14/game-buckshot.html')">
             <span class="tag">第 1 个游戏</span>
             <h2>恶魔轮盘赌</h2>
             <p>数学老师特供版。包含普通模式、无限模式、联机模式入口，以及娱乐用人机验证。</p>
@@ -579,7 +579,7 @@
             </div>
         </article>
 
-        <article class="game-card enabled" onclick="location.href='./02/2026.07.06-2026.09.19/game-tictactoe.html'">
+        <article class="game-card enabled" onclick="goGame('./02/2026.07.06-2026.09.19/game-tictactoe.html')">
             <span class="tag">第 2 个游戏</span>
             <h2>三子棋</h2>
             <p>3×3 棋盘，每人只有三枚棋子，下第四子时最早那枚会自动消失。支持人机对战与联机对战，先把三子连成横、竖或斜线者获胜。</p>
@@ -592,6 +592,42 @@
 
     <h2 class="section-title">开发中</h2>
     <section class="game-grid" id="future-grid"></section>
+
+<script>
+/* 主页独有的标记文字：用来判断拿到的到底是游戏页还是被 fallback 回了主页 */
+var HOME_MARK = '选择游戏';
+
+function goGame(url) {
+    /* 带时间戳参数，绕开浏览器与边缘缓存 */
+    var target = url + (url.indexOf('?') > -1 ? '&' : '?') + '_=' + Date.now();
+    var jumped = false;
+    function jump() {
+        if (jumped) return;
+        jumped = true;
+        location.replace(target);
+    }
+    /* 3 秒兜底：探测卡住也照跳 */
+    var timer = setTimeout(jump, 3000);
+
+    try {
+        fetch(target, { cache: 'reload' })
+            .then(function (r) { return r.text(); })
+            .then(function (t) {
+                clearTimeout(timer);
+                if (t.indexOf(HOME_MARK) > -1) {
+                    /* 拿到的还是主页 → 边缘缓存没刷新，再强刷一次再跳 */
+                    fetch(target, { cache: 'reload' }).then(jump, jump);
+                } else {
+                    jump();
+                }
+            })
+            .catch(jump);
+    } catch (e) {
+        clearTimeout(timer);
+        jump();
+    }
+}
+</script>
 
     <footer>后续新增游戏时，只要继续往这个首页加卡片即可。</footer>
 </main>
