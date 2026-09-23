@@ -569,7 +569,7 @@
 
     <h2 class="section-title">选择游戏</h2>
     <section class="game-grid" id="game-grid">
-        <article class="game-card enabled" onclick="location.href='game-buckshot.html'">
+        <article class="game-card enabled" onclick="goGame(this,'buckshot')">
             <span class="tag">第 1 个游戏</span>
             <h2>恶魔轮盘赌</h2>
             <p>数学老师特供版。包含普通模式、无限模式、联机模式入口，以及娱乐用人机验证。</p>
@@ -592,6 +592,45 @@
 
     <h2 class="section-title">开发中</h2>
     <section class="game-grid" id="future-grid"></section>
+
+<script>
+/* 游戏文件候选路径：依次探测，命中第一个可访问的就跳转。
+   根目录优先，找不到再回退原来的子目录，两边都能跳。 */
+var GAME_PATHS = {
+    buckshot: [
+        'game-buckshot.html',
+        '01/2026.06.20-7:14/game-buckshot.html'
+    ],
+    tictactoe: [
+        'game-tictactoe.html',
+        '02/2026.07.06-2026.09.19/game-tictactoe.html'
+    ]
+};
+
+function goGame(card, key) {
+    var list = GAME_PATHS[key] || [];
+    var i = 0;
+    function next() {
+        if (i >= list.length) {
+            card.classList.add('disabled');
+            var line = card.querySelector('.play-line span');
+            if (line) line.textContent = '文件未找到';
+            return;
+        }
+        var url = list[i++];
+        fetch(url, { method: 'HEAD' })
+            .then(function (r) {
+                if (r.ok || r.status === 304) location.href = url;
+                else next();
+            })
+            .catch(function () {
+                /* file:// 或跨域无法探测时，直接跳首选，至少不卡住 */
+                location.href = list[0];
+            });
+    }
+    next();
+}
+</script>
 
     <footer>后续新增游戏时，只要继续往这个首页加卡片即可。</footer>
 </main>
