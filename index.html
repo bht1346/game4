@@ -554,7 +554,7 @@
 
     <section class="stats">
         <div class="stat">
-            <strong>2</strong>
+            <strong>3</strong>
             <span>已加入游戏</span>
         </div>
         <div class="stat">
@@ -569,7 +569,7 @@
 
     <h2 class="section-title">选择游戏</h2>
     <section class="game-grid" id="game-grid">
-        <article class="game-card enabled" onclick="location.href='./01/2026.06.20-7.14/game-buckshot.html'">
+        <article class="game-card enabled" onclick="location.href='./01-2026.06.20-7h14m/game-buckshot.html'">
             <span class="tag">第 1 个游戏</span>
             <h2>恶魔轮盘赌</h2>
             <p>数学老师特供版。包含普通模式、无限模式、联机模式入口，以及娱乐用人机验证。</p>
@@ -579,10 +579,20 @@
             </div>
         </article>
 
-        <article class="game-card enabled" onclick="location.href='./02/2026.07.06-2026.09.19/game-tictactoe.html'">
+        <article class="game-card enabled" onclick="location.href='./02-2026.07.06-2026.09.19/game-tictactoe.html'">
             <span class="tag">第 2 个游戏</span>
             <h2>三子棋</h2>
             <p>3×3 棋盘，每人只有三枚棋子，下第四子时最早那枚会自动消失。支持人机对战与联机对战，先把三子连成横、竖或斜线者获胜。</p>
+            <div class="play-line">
+                <span>点击开始</span>
+                <span class="arrow">→</span>
+            </div>
+        </article>
+
+        <article class="game-card enabled" onclick="location.href='./03-2026.07.18-2026.09.24/shooter-game.html'">
+            <span class="tag">第 3 个游戏</span>
+            <h2>平面射击</h2>
+            <p>横版射击对战。支持多指触控、摇杆瞄准、二段跳与武器整合包（狙击可开镜蓄力穿甲，霰弹按住收束散射）。可单人打人机，也能用房间码和朋友联机，击杀对手即为胜利。</p>
             <div class="play-line">
                 <span>点击开始</span>
                 <span class="arrow">→</span>
@@ -646,7 +656,7 @@
 // ===================================================================
 const futureGrid = document.getElementById('future-grid');
 const futureCount = 12;
-for (let i = 3; i < 3 + futureCount; i++) {
+for (let i = 4; i < 4 + futureCount; i++) {
     const card = document.createElement('article');
     card.className = 'game-card locked';
     card.innerHTML = `
