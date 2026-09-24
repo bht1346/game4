@@ -604,42 +604,110 @@ async function disbandTeam(env, teamId) {
 // ---------------- 主入口 ----------------
 // 绑定名容错：Cloudflare 后台填变量名时可能不小心带上首尾空格或大小写不一致，
 // 这里统一归一化，避免 “明明填了 DB / APP_KV 却读不到” 的坑。
-function normalizeBindings(env) {
-  if (!env || env.__bindingsNormalized) return env;
+// 归一化绑定名：DBp -> DBP，app-kv -> APPKV，便于按名字打分
+function normKey(k) {
+  return String(k || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+// 列出候选绑定并按"名字像不像"排序。
+// 名字优先很关键：Cloudflare 现在把绑定做成 RPC 代理，代理上 typeof 任何方法
+// 都是 'function'（哪怕它根本没实现），所以按能力猜会认错，必须名字先上。
+function candidateList(env, kind) {
+  const out = [];
+  for (const k of Object.keys(env || {})) {
+    if (k.startsWith('__')) continue;
+    const v = env[k];
+    if (!v || typeof v !== 'object') continue;   // 环境变量是字符串，跳过
+    const n = normKey(k);
+    if (!n || n === 'ASSETS') continue;          // 静态资源不是存储
+    let score;
+    if (kind === 'db') {
+      if (n === 'DB' || n === 'DBP' || n === 'D1' || n === 'GAMEDB') score = 0;
+      else if (n.startsWith('DB') || n.startsWith('D1')) score = 1;
+      else if (n.includes('DB')) score = 2;
+      else score = 8;
+    } else {
+      if (n === 'APPKV' || n === 'KVP' || n === 'KV' || n === 'GAMEKV') score = 0;
+      else if (n.includes('KV')) score = 1;
+      else score = 8;
+    }
+    out.push({ k, v, n, score });
+  }
+  out.sort((a, b) => a.score - b.score);
+  return out;
+}
+
+// 上次成功的绑定名，同一部署内基本不变，记下来可以少探测几次
+const BIND_MEMO = { db: null, kv: null };
+
+// 光看 typeof 不算数，必须真调用一次：只有 prepare() 真能跑通的才是 D1。
+// 认错绑定会导致 "The RPC receiver does not implement the method 'prepare'"。
+async function resolveStorage(env) {
+  if (!env || env.__storageResolved) return env;
   try {
-    // 1) 去掉首尾空格的别名
-    for (const k of Object.keys(env)) {
-      const t = k.trim();
-      if (t !== k && env[t] === undefined) env[t] = env[k];
-    }
-    // 2) 大小写不敏感的别名（DB / APP_KV / DBp / KVp ...）
-    for (const k of Object.keys(env)) {
-      const up = k.trim().toUpperCase().replace(/[\s-]+/g, '_');
-      if ((up === 'DB' || up === 'APP_KV') && env[up] === undefined) env[up] = env[k];
-    }
-    // 3) 按"能力"兜底识别：不管后台把变量名写成 DB / DBp / game_db / KVp，
-    //    D1 一定有 prepare()，KV 一定有 get()+put()。按类型认，比按名字猜更稳。
     if (!env.DB) {
-      for (const k of Object.keys(env)) {
-        const v = env[k];
-        if (v && typeof v === 'object' && typeof v.prepare === 'function' && typeof v.batch === 'function') {
-          env.DB = v; break;
+      const list = candidateList(env, 'db');
+      // 上次成功过的名字排到最前
+      if (BIND_MEMO.db) {
+        const i = list.findIndex((c) => c.k === BIND_MEMO.db);
+        if (i > 0) list.unshift(list.splice(i, 1)[0]);
+      }
+      for (const c of list) {
+        try {
+          await c.v.prepare('SELECT 1').first();
+          env.DB = c.v; env.__dbKey = c.k; BIND_MEMO.db = c.k;
+          console.error('[bindings] D1 已就绪，使用绑定名：' + c.k);
+          break;
+        } catch (e) {
+          console.error('[bindings] 绑定 ' + c.k + ' 不是可用的 D1：' + String((e && e.message) || e));
         }
       }
     }
     if (!env.APP_KV) {
-      for (const k of Object.keys(env)) {
-        const v = env[k];
-        // KV 有 get/put/list；D1 没有 put，ASSETS 只有 fetch，不会误判
-        if (v && typeof v === 'object' && typeof v.get === 'function'
-            && typeof v.put === 'function' && typeof v.prepare !== 'function') {
-          env.APP_KV = v; break;
+      const list = candidateList(env, 'kv');
+      if (BIND_MEMO.kv) {
+        const i = list.findIndex((c) => c.k === BIND_MEMO.kv);
+        if (i > 0) list.unshift(list.splice(i, 1)[0]);
+      }
+      for (const c of list) {
+        try {
+          await c.v.get('__probe__');
+          env.APP_KV = c.v; env.__kvKey = c.k; BIND_MEMO.kv = c.k;
+          console.error('[bindings] KV 已就绪，使用绑定名：' + c.k);
+          break;
+        } catch (e) {
+          console.error('[bindings] 绑定 ' + c.k + ' 不是可用的 KV：' + String((e && e.message) || e));
         }
       }
     }
   } catch (e) { /* env 可能是只读代理，忽略即可 */ }
+  try { env.__storageResolved = true; } catch (e) {}
+  return env;
+}
+
+function normalizeBindings(env) {
+  if (!env || env.__bindingsNormalized) return env;
+  try {
+    // 去首尾空格的别名，兼容后台填变量名时手滑带空格
+    for (const k of Object.keys(env)) {
+      const t = k.trim();
+      if (t !== k && env[t] === undefined) env[t] = env[k];
+    }
+  } catch (e) { /* env 可能是只读代理，忽略即可 */ }
   try { env.__bindingsNormalized = true; } catch (e) {}
   return env;
+}
+
+// 出错时绝不能把原始异常回给客户端——里面可能带绑定名、SQL、内部路径。
+// 详情只进服务端日志（Cloudflare 后台 Logs 可见），对外统一一句话。
+function safeError(e) {
+  try { console.error('[error] ' + String((e && (e.stack || e.message)) || e)); } catch (_) {}
+  const m = String((e && e.message) || e || '');
+  if (/RPC|prepare|D1_ERROR|no such table|SQLITE/i.test(m)) {
+    return '服务暂不可用，请稍后再试。';
+  }
+  if (m.length > 120) return '服务暂不可用，请稍后再试。';
+  return m;
 }
 
 // 注意：绑定名属于基础设施信息，绝不能回给客户端——那等于把后端的
@@ -654,7 +722,8 @@ function bindingHint(env) {
 
 export async function onRequest(context) {
   const { request } = context;
-  const env = normalizeBindings(context.env);
+  // 先按名字 + 真调用探测把 D1/KV 认准，再往下走
+  const env = await resolveStorage(normalizeBindings(context.env));
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: JSON_HEADERS });
@@ -666,10 +735,11 @@ export async function onRequest(context) {
   // 探活：前端靠它自动判断"后端在不在"，不用用户手填地址。
   // 放在 DB 检查之前——没绑定 D1 时也要能回话，顺便把原因告诉前端。
   if (path === 'ping' || path === 'game/ping') {
-    return json({
-      ok: true, pong: true, db: !!env.DB,
-      hint: env.DB ? '' : '数据存储未就绪，已降级为离线模式（详细原因见服务端日志）。'
-    });
+    let hint = '';
+    if (!env.DB && !env.APP_KV) hint = '数据存储未就绪，已降级为离线模式（详细原因见服务端日志）。';
+    else if (!env.DB) hint = '数据库未就绪，已降级为离线模式（详细原因见服务端日志）。';
+    else if (!env.APP_KV) hint = '会话存储未就绪，登录可能失败（详细原因见服务端日志）。';
+    return json({ ok: true, pong: true, db: !!env.DB, kv: !!env.APP_KV, hint });
   }
 
   try {
@@ -1706,7 +1776,7 @@ export async function onRequest(context) {
 
     return json({ ok: false, error: '未知接口：' + path }, 404);
   } catch (e) {
-    return json({ ok: false, error: String((e && e.message) || e) }, 500);
+    return json({ ok: false, error: safeError(e) }, 500);
   }
 }
 
