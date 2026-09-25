@@ -412,15 +412,24 @@ async function getAnnounce(env) {
 }
 
 // ---------------- D1 基础操作 ----------------
-async function dbAll(env, sql, ...params) {
+// 兼容两种写法：既允许 dbRun(env, sql, a, b, c)，也允许 dbRun(env, sql, [a,b,c])。
+// 之前只支持变参，而联机那批代码是按数组传的——bind 收到一整个数组，
+// 会把数组当成一个值绑到第一个 ? 上（D1 甚至直接报类型错），
+// 结果就是联机全挂、账号照常能用（账号那批是展开传的）。
+function bindStmt(env, sql, params) {
+  const p = (Array.isArray(params[0]) ? params[0] : params)
+    .map((v) => (v === undefined ? null : v));
   const stmt = env.DB.prepare(sql);
-  const res = await (params.length ? stmt.bind(...params) : stmt).all();
+  return p.length ? stmt.bind(...p) : stmt;
+}
+
+async function dbAll(env, sql, ...params) {
+  const res = await bindStmt(env, sql, params).all();
   return res.results || [];
 }
 
 async function dbRun(env, sql, ...params) {
-  const stmt = env.DB.prepare(sql);
-  return await (params.length ? stmt.bind(...params) : stmt).run();
+  return await bindStmt(env, sql, params).run();
 }
 
 async function dbGet(env, sql, ...params) {
@@ -1876,13 +1885,30 @@ async function matchSweep(env, now) {
   } catch (e) { /* 清理失败不影响主流程 */ }
 }
 
+// D1 的 run() 只在 meta 里返回 changes（顶层没有），不同运行环境还可能不一样，
+// 所以两个位置都看；取不到就直接查表确认，别把"没抢到"误判成"没生效"。
+function runChanges(r) {
+  if (!r) return 0;
+  if (typeof r.changes === 'number') return r.changes;
+  if (r.meta && typeof r.meta.changes === 'number') return r.meta.changes;
+  return -1; // -1 表示未知，交给调用方查表确认
+}
+
 // 抢座：主键冲突即已被占，换下一个。天然防超卖，无需事务
 async function matchClaimSeat(env, roomId, seats, ticket, name, now) {
   for (let s = 0; s < seats; s++) {
     const r = await dbRun(env,
       `INSERT OR IGNORE INTO match_seats (room,seat,ticket,name,state,beat,created_at) VALUES (?,?,?,?,'wait',?,?)`,
       [roomId, s, ticket, name, now, now]);
-    if (r && r.changes === 1) {
+    const ch = runChanges(r);
+    // 改动数可靠就信它；不可靠（比如某个环境不返回）就回表查一次，
+    // 确认这个座位上的凭据确实是自己的，才算抢到
+    let got = ch === 1;
+    if (ch < 0) {
+      const own = await dbGet(env, 'SELECT ticket FROM match_seats WHERE room=? AND seat=?', [roomId, s]);
+      got = !!(own && own.ticket === ticket);
+    }
+    if (got) {
       await dbRun(env, 'UPDATE match_rooms SET joined = (SELECT COUNT(*) FROM match_seats WHERE room = ?) WHERE id = ?', [roomId, roomId]);
       return s;
     }
