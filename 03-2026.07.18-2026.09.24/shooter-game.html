@@ -3719,9 +3719,47 @@ sound    音效文件    note   备注</pre>
         const pendingShots = [];     // 自己刚开的火，下次广播时一并发给对手
         let hudRows   = [];          // HUD 行缓存：{ fill, num, row, get, max }
 
+        // ---- 出生点分配 ----
+        // 联机时双方在本地都是"自己"，如果各自固定在同一个坐标出生，
+        // 两个人就会叠在一个点上开局。这里按座位号给每个人分配互不重合的落点。
+        let spawnSlots = { me: 0, others: [], total: 1 };
+        function mySeatIndex() {
+            if (typeof MM !== 'undefined' && MM.on && typeof MM.seat === 'number' && MM.seat >= 0) return MM.seat;
+            return 0;
+        }
+        function computeSpawnSlots() {
+            const total = Math.max(1, players.length);
+            const used = new Set();
+            const me = Math.min(total - 1, mySeatIndex());
+            used.add(me);
+            const others = [];
+            for (let i = 1; i < players.length; i++) {
+                const p = players[i];
+                // 真人按他自己的座位号；人机补空位，绝不跟真人抢
+                let s = (p && p.type === 'online' && typeof p.seat === 'number' && p.seat >= 0) ? p.seat : -1;
+                if (s < 0 || s >= total || used.has(s)) {
+                    s = 0;
+                    while (used.has(s)) s++;
+                }
+                used.add(s);
+                others.push(s);
+            }
+            spawnSlots = { me: me, others: others, total: total };
+            return spawnSlots;
+        }
+        // 第 slot 个落点（共 total 个）沿世界横向均匀铺开
+        function spawnSlotX(slot, total) {
+            const margin = WALL_THICKNESS + 260;
+            const span = Math.max(600, WORLD_WIDTH - 2 * WALL_THICKNESS - 520);
+            const denom = Math.max(1, total - 1);
+            const s = Math.max(0, Math.min(total - 1, slot));
+            return Math.round(margin + s * (span / denom));
+        }
+
         // 生成/清理战斗单位
         function spawnFighters() {
             clearFighters();
+            const slots = computeSpawnSlots();
             const n = Math.max(0, players.length - 1);
             for (let i = 0; i < n; i++) {
                 const p = players[i + 1];          // players[0] 是自己
@@ -3735,19 +3773,19 @@ sound    音效文件    note   备注</pre>
                 el.appendChild(tag);
                 world.appendChild(el);
 
-                // 出生点：沿世界横向铺开，彼此拉开距离，避免开局叠在一起
-                const slot = WALL_THICKNESS + 260 +
-                    (i + 1) * ((WORLD_WIDTH - 2 * WALL_THICKNESS - 520) / Math.max(1, n + 1));
+                // 出生点：按座位号铺开，两边算出来的坐标一致，不会叠在一起
+                const mySlot = (slots.others[i] !== undefined) ? slots.others[i] : (i + 1);
                 fighters.push({
                     id: i,
                     name: p.name,
                     type: isOnline ? 'online' : 'bot',
                     el, tag,
-                    x: slot,
+                    x: spawnSlotX(mySlot, slots.total),
                     y: groundTop - PLAYER_SIZE,
                     vx: 0, vy: 0,
                     onGround: true,
-                    facing: -1,
+                    // 开局朝向对手：对手在我右边就面朝左，反之面朝右
+                    facing: (mySlot > slots.me) ? -1 : 1,
                     hp: MAX_HP,
                     jumpsLeft: 2,
                     speedMul: 0.85 + Math.random() * 0.4,   // 每台人机快慢略有差异
@@ -3768,7 +3806,8 @@ sound    音效文件    note   备注</pre>
                     const nf = fighters[fighters.length - 1];
                     if (typeof d.hp === 'number') nf.hp = d.hp;
                     if (typeof d.x  === 'number') { nf.x = d.x; nf.tx = d.x; }
-                    if (typeof d.y  === 'number') { nf.y = d.y; nf.ty = d.y; }
+                    if (typeof d.yr === 'number') { nf.y = groundTop + d.yr; nf.ty = nf.y; }
+                    else if (typeof d.y === 'number') { nf.y = d.y; nf.ty = d.y; }
                     delete remoteCache[p.name];
                 }
             }
@@ -4431,7 +4470,7 @@ sound    音效文件    note   备注</pre>
                 if (p.seat === MM.seat) return;
                 const nm = p.name || ('玩家' + p.seat);
                 if (!players.some(x => x.type === 'online' && x.name === nm)) {
-                    players.push({ name: nm, type: 'online' });
+                    players.push({ name: nm, type: 'online', seat: p.seat });
                 }
             });
             if (!players.some(p => p.type === 'online')) {
@@ -4661,6 +4700,9 @@ sound    音效文件    note   备注</pre>
                 n: playerNickname,
                 x: Math.round(playerPhysics.x),
                 y: Math.round(playerPhysics.y),
+                // 相对地面高度：两台设备屏幕高度不同，绝对 y 在对方屏幕上会对不上，
+                // 换算成"离地多高"才能跨设备对齐（站立时恒为 -PLAYER_SIZE）
+                yr: Math.round(playerPhysics.y - groundTop),
                 hp: Math.round(selfHp),
                 f: playerPhysics.facing,
                 dead: selfHp <= 0,
@@ -4703,7 +4745,9 @@ sound    音效文件    note   备注</pre>
             f.hp = typeof d.hp === 'number' ? d.hp : f.hp;
             // 不直接写 f.x/f.y，交给插值平滑过渡到目标点
             if (typeof d.x === 'number') f.tx = d.x;
-            if (typeof d.y === 'number') f.ty = d.y;
+            // 优先用相对地面高度（跨设备通用），只有旧版本数据才退回绝对 y
+            if (typeof d.yr === 'number') f.ty = groundTop + d.yr;
+            else if (typeof d.y === 'number') f.ty = d.y;
             f.facing = d.f || f.facing;
             f.tag.textContent = `${f.name} ${Math.max(0, Math.ceil(f.hp))}`;
             f.tag.style.color = f.hp <= 30 ? '#ea4335' : (f.hp <= 60 ? '#fbbc05' : '#fff');
@@ -4713,7 +4757,10 @@ sound    音效文件    note   备注</pre>
             if (Array.isArray(d.shots)) {
                 d.shots.slice(0, 24).forEach(sh => {
                     if (typeof sh.sx === 'number' && typeof sh.tx === 'number') {
-                        spawnBullet(sh.sx, sh.sy, sh.tx, sh.ty, f);
+                        // 对方的子弹起点/终点也要换算到本机地面基准，否则会打偏
+                        const sy = typeof sh.syr === 'number' ? groundTop + sh.syr : sh.sy;
+                        const ty = typeof sh.tyr === 'number' ? groundTop + sh.tyr : sh.ty;
+                        spawnBullet(sh.sx, sy, sh.tx, ty, f);
                     }
                 });
             }
@@ -4786,12 +4833,14 @@ sound    音效文件    note   备注</pre>
             renderPlayerList();
 
             // 初始化玩家位置（世界坐标）
-            playerPhysics.x = WALL_THICKNESS + 60;
+            // 出生点同样按座位号分配：联机时双方各占一个落点，不再叠在一起
+            playerPhysics.x = spawnSlotX(spawnSlots.me, spawnSlots.total);
             playerPhysics.y = groundTop - PLAYER_SIZE;
             playerPhysics.vx = 0;
             playerPhysics.vy = 0;
             playerPhysics.onGround = true;
-            playerPhysics.facing = 1;
+            // 开局朝向场地中心，左右两侧对称
+            playerPhysics.facing = (spawnSlots.me < spawnSlots.total / 2) ? 1 : -1;
             camera.x = 0;
 
             // 根据设置显示/隐藏移动端控件
@@ -6205,7 +6254,11 @@ sound    音效文件    note   备注</pre>
                 // 上限保护：断线或对方卡住时不让待发队列无限增长，
                 // 否则恢复连接瞬间会一次性打出一长串子弹
                 if (pendingShots.length < 40) {
-                    pendingShots.push({ sx: startX, sy: startY, tx: targetX, ty: targetY });
+                    pendingShots.push({
+                        sx: startX, sy: startY, tx: targetX, ty: targetY,
+                        // 同上：y 用相对地面高度，跨设备才对得上
+                        syr: startY - groundTop, tyr: targetY - groundTop
+                    });
                 }
             }
 
