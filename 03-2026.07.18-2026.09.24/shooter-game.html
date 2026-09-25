@@ -7,44 +7,10 @@
          玻璃后面只剩一片纯色，看着就像"糊成一团"）。不带反而能正常显示。 -->
     <meta name="referrer" content="no-referrer">
     <title>平面射击游戏</title>
-    <!-- 联机库 PeerJS：改成页面加载完再异步拉，不再阻塞首屏。
-         原来这里是同步 <script src="unpkg...">，放在 head 里 —— 国内网络访问
-         unpkg 经常连不上或超时，浏览器会卡在这条请求上几十秒，连下面的 body
-         都解析不下去，表现就是"白屏 / 界面出不来 / 所有按钮点了没反应"。
-         现在按 国内镜像 → jsDelivr → unpkg 依次尝试；9 秒还没就绪就判定不可用，
-         联机自动降级，单机与人机对局照常能玩。 -->
-    <script>
-    (function () {
-        var CDN = [
-            'https://registry.npmmirror.com/peerjs/1.5.4/files/dist/peerjs.min.js',
-            'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js',
-            'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'
-        ];
-        window.PEER_STATE = 'loading';        // loading → ready / failed
-        var i = 0;
-        function next() {
-            if (i >= CDN.length) { window.PEER_STATE = 'failed'; return; }
-            var sc = document.createElement('script');
-            sc.src = CDN[i++];
-            sc.async = true;
-            sc.onload = function () {
-                window.PEER_STATE = (typeof Peer !== 'undefined') ? 'ready' : 'failed';
-            };
-            sc.onerror = function () { next(); };
-            document.head.appendChild(sc);
-        }
-        function boot() { setTimeout(next, 0); }
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', boot);
-        } else { boot(); }
-        // 兜底超时：一直挂着不晓得成不成功，就直接判失败，免得匹配永远干等
-        setTimeout(function () {
-            if (typeof Peer === 'undefined' && window.PEER_STATE !== 'ready') {
-                window.PEER_STATE = 'failed';
-            }
-        }, 9000);
-    })();
-    </script>
+    <!-- 联机不再依赖 PeerJS：配对走自己的后端（同源 /api/match/*），
+         对局数据优先 WebRTC 直连，直连失败才经服务器转发。
+         第三方公共信令服务器限流严重、国内常连不上，是"点了匹配没反应"的根源，
+         所以整段移除，页面不再请求任何外部脚本。 -->
     <!-- 武器整合包：独立于本文件，改枪不用动 HTML -->
     <script>
 /* ==== 武器整合包引擎（原 weaponpacks.js，已内联 —— 单文件即可运行）==== */
@@ -216,6 +182,85 @@
         },
 
         /* ---------------------------------------------------------------
+         *  温雷投掷：按住开始温雷 → 松手抛出 → 抛物线落地滚动 → 引信到点爆炸
+         *  温得越久，出手后剩下的引信越短（最快落地就炸）；
+         *  一直按着不松手，会直接在手里炸开（伤害自己）
+         * ------------------------------------------------------------- */
+        grenade: {
+            label: '温雷投掷',
+            desc: '按住温雷，松手抛出，落地滚动，到点爆炸',
+
+            defaults: {
+                fireMode: 'release',
+                fuseMs:    5000,  // 总引信时长
+                minFuse:   400,   // 出手后至少留这么久，防止一扔就炸
+                gravity:   0.55,  // 抛物线重力（每帧加到垂直速度上）
+                bounce:    0.42,  // 落地反弹系数
+                friction:  0.86,  // 贴地滚动时的摩擦衰减
+                blast:     210,   // 爆炸半径
+                blastDmg:  120,   // 爆炸伤害（正中心）
+                ammo:      3      // 携带数量：打完就没了
+            },
+
+            press: function (w, st) {
+                // 没雷了就别温了，直接拒绝
+                if (typeof ammoLeft === 'function' && ammoLeft(w) <= 0) {
+                    if (typeof toast === 'function') toast('没有手雷了');
+                    return false;
+                }
+                st.cooking = true;
+                st.t0 = performance.now();
+                return false;      // 不连发
+            },
+
+            tick: function (w, st, ctx) {
+                if (!st.cooking) return;
+                const cfg = Object.assign({}, this.defaults, w.grenade || {});
+                const held = performance.now() - st.t0;
+                st.fuseLeft = Math.max(0, cfg.fuseMs - held);
+                // 画一条抛物线预览，松手前就能看出会落在哪
+                if (ctx.hud && ctx.hud.drawArc) {
+                    ctx.hud.drawArc(ctx.originX, ctx.originY, ctx.aimX, ctx.aimY,
+                                    w.speed || 14, cfg.gravity, st.fuseLeft / cfg.fuseMs);
+                }
+                // 一直按着不松手：在手里炸开
+                if (st.fuseLeft <= 0 && typeof cookExplode === 'function') {
+                    st.cooking = false;
+                    cookExplode(w, cfg);
+                }
+            },
+
+            release: function (w, st) {
+                if (!st.cooking) return null;
+                st.cooking = false;
+                const cfg = Object.assign({}, this.defaults, w.grenade || {});
+                const held = performance.now() - st.t0;
+                return {
+                    throwable: true,
+                    fuse:     Math.max(cfg.minFuse, cfg.fuseMs - held),
+                    gravity:  cfg.gravity,
+                    bounce:   cfg.bounce,
+                    friction: cfg.friction,
+                    rollDecay:cfg.rollDecay != null ? cfg.rollDecay : 0.985,
+                    blast:    cfg.blast,
+                    blastDmg: cfg.blastDmg
+                };
+            },
+
+            decorate: function (w, st, opts) {
+                const cfg = Object.assign({}, this.defaults, w.grenade || {});
+                opts.throwable = true;
+                opts.fuse      = (st && st.fuseLeft != null) ? Math.max(cfg.minFuse, st.fuseLeft) : cfg.fuseMs;
+                opts.gravity   = cfg.gravity;
+                opts.bounce    = cfg.bounce;
+                opts.friction  = cfg.friction;
+                opts.blast     = cfg.blast;
+                opts.blastDmg  = cfg.blastDmg;
+                return opts;
+            }
+        },
+
+        /* ---------------------------------------------------------------
          *  普通枪：没有特殊逻辑，按下即射（手枪/步枪走这条）
          * ------------------------------------------------------------- */
         plain: {
@@ -351,12 +396,20 @@
                        ? w.color : '#ffcc33',
             behavior: BEHAVIORS[w.behavior] ? w.behavior : 'plain',
             fireMode: (w.fireMode === 'press' || w.fireMode === 'release') ? w.fireMode : null,
-            builtin: !!w.builtin
+            builtin: !!w.builtin,
+            // hpFloor：命中后把目标血量直接压到这个值（火箭筒打不死人，只剩一口气）
+            //          0 表示不用这套，按正常伤害扣血
+            hpFloor: Math.round(num(w.hpFloor, 0, 500, 0)),
+            // ammo：携带数量。null/0 表示无限（枪械走这条），>0 就是消耗品（手雷）
+            ammo: (w.ammo != null && Number(w.ammo) > 0)
+                      ? Math.round(num(w.ammo, 1, 999, 1)) : null
         };
         if (w.charge && typeof w.charge === 'object') out.charge = w.charge;
+        if (w.grenade && typeof w.grenade === 'object') out.grenade = w.grenade;
         if (w.choke  && typeof w.choke  === 'object') out.choke  = w.choke;
         // 规划中字段：原样保存，导出不丢
-        ['icon','sprite','recoil','ammo','reload','range','explosive','sound','note']
+        // ammo 已经是正式字段（消耗品数量），不再走这条保留通道
+        ['icon','sprite','recoil','reload','range','explosive','sound','note']
             .forEach(k => { if (w[k] !== undefined) out[k] = w[k]; });
         return out;
     }
@@ -1501,6 +1554,27 @@
         }
         /* 人机/对手打过来的子弹用红色，一眼分清敌我 */
         .bullet.enemy { background-color: #ea4335; }
+
+        /* 投掷物：手雷是圆的，不吃那套子弹样式 */
+        .bullet.grenade {
+            width: 14px; height: 14px; border-radius: 50%;
+            background: #4a5a3a; border: 2px solid #8fa86a;
+            box-shadow: 0 0 8px rgba(255,180,60,.9);
+            animation: blink .18s steps(1) infinite;
+        }
+        @keyframes blink { 0%{opacity:1} 50%{opacity:.35} 100%{opacity:1} }
+
+        /* 爆炸：一圈迅速扩散并淡出的光环 */
+        .explosion {
+            position: absolute; border-radius: 50%;
+            background: radial-gradient(circle, #fff3b0 0%, #ff9d2e 40%, rgba(255,80,0,.35) 70%, transparent 100%);
+            z-index: 6; pointer-events: none;
+            animation: boom .42s ease-out forwards;
+        }
+        @keyframes boom {
+            from { transform: scale(.15); opacity: 1; }
+            to   { transform: scale(1);   opacity: 0; }
+        }
 
         /* 多指触控必备：禁止浏览器把手势抢去做滚动/缩放，
            否则第二根手指会被 pointercancel 打断，表现为"按了没反应" */
@@ -2813,12 +2887,16 @@ spread   散布角度  0 - 60 度       默认 0
 pellets  每发弹丸  1 - 12          默认 1
 zoom     视野倍数 1 - 5            默认 1（>1 = 缩小画面，看到的区域更大）
 color    子弹颜色  #ffcc33 或 red，默认 #ffcc33
-pierce   穿透层数  0 - 10          默认 0（狙击穿甲用）</pre>
+pierce   穿透层数  0 - 10          默认 0（狙击、火箭筒穿甲用）
+hpFloor  打残不死  0 - 500         默认 0（填 10 = 命中后对方只剩 10 血，不直接打死）
+ammo     携带数量  1 - 999         不填 = 无限；填了就是消耗品，打完为止（手雷）
+         消耗品在切枪按钮上显示剩余数量，每局开局自动补满</pre>
 
                     <p class="fmt-h">behavior：决定这把枪的手感</p>
                     <pre>plain          普通：按下即射，可连发
 charge_sniper  蓄力狙击：同霰弹手感，按住缩视野、锥形由大收小，伤害更高且可穿甲
-choke_shotgun  收束霰弹：按住越久弹道越收拢，松手一次性打出去</pre>
+choke_shotgun  收束霰弹：按住越久弹道越收拢，松手一次性打出去
+grenade        温雷投掷：按住温雷，松手抛出，抛物线落地滚动，到点引爆</pre>
                     <p>没写 behavior 就是 <code>plain</code>。写了不存在的名字会自动退回 <code>plain</code>。</p>
 
                     <p class="fmt-h">fireMode：什么时候打出去</p>
@@ -2836,9 +2914,22 @@ zoom 填 2.6 就是按住时画面缩到 1/2.6，看到的区域变大 2.6 倍</
                     <pre>"choke": { "chokeMs": 1200, "spreadFrom": 18, "spreadTo": 4 }
 按住 1200 毫秒内，散布从 18&deg; 收到 4&deg;</pre>
 
+                    <p class="fmt-h">温雷投掷专属：grenade</p>
+                    <pre>"grenade": { "fuseMs": 5000, "minFuse": 400,
+              "gravity": 0.55, "bounce": 0.42, "friction": 0.86,
+              "blast": 210, "blastDmg": 120 }
+fuseMs    总引信时长（按住就开始烧，5 秒）
+minFuse   出手后至少留多久，防止一扔就炸
+gravity   抛物线重力，越大弧线越弯
+bounce    落地反弹系数   friction  撞击时的横向衰减（落地只轻微掉速）
+rollDecay 贴地滚动每帧衰减，0.985 左右滚得最自然，越小停得越快
+blast     爆炸半径       blastDmg 爆炸中心伤害（边缘衰减到约 40%）</pre>
+                    <p>按住越久，出手后剩下的引信越短 —— <b>温雷就是拿命换落点</b>。
+                    一直按着不松手，雷会在你手里炸开（自己也会吃伤害）。</p>
+
                     <p class="fmt-h">规划中：写了会保存，暂时不改变手感</p>
                     <pre>icon / sprite  贴图路径（后面上贴图就靠这两个）
-recoil   后坐力      ammo   弹匣容量     reload 换弹时间
+recoil   后坐力      reload 换弹时间
 range    有效射程    explosive 爆炸半径
 sound    音效文件    note   备注</pre>
 
@@ -2869,6 +2960,14 @@ sound    音效文件    note   备注</pre>
       "spread": 18, "pellets": 8, "zoom": 1, "color": "#ff9944",
       "behavior": "choke_shotgun", "fireMode": "release",
       "choke": { "chokeMs": 1200, "spreadFrom": 20, "spreadTo": 5 }
+    },
+    {
+      "name": "手雷", "dmg": 120, "cd": 700, "speed": 14,
+      "zoom": 1, "color": "#8fa86a", "ammo": 3,
+      "behavior": "grenade", "fireMode": "release",
+      "grenade": { "fuseMs": 5000, "minFuse": 400, "gravity": 0.55,
+                   "bounce": 0.42, "friction": 0.86,
+                   "blast": 210, "blastDmg": 120 }
     }
   ]
 }</pre>
@@ -3115,7 +3214,7 @@ sound    音效文件    note   备注</pre>
         // ========== 全局状态 ==========
         let isConfirmed = false;
         let playerNickname = '';
-        let peer = null;
+        let peer = null;   // 旧 PeerJS 实例，已不再使用（联机改为自建配对 + WebRTC）
         let matchTimer = null;
         let countdownTimer = null;
         let currentMode = null;
@@ -3563,11 +3662,7 @@ sound    音效文件    note   备注</pre>
         // 换枪后：刷新按钮文字 + 用新射速重启连发（否则射速还是上一把的）
         function onWeaponChanged() {
             const w = curWeapon();
-            const btn = document.getElementById('weaponBtn');
-            if (btn) {
-                btn.textContent = w ? w.name.slice(0, 3) : '无';
-                btn.classList.toggle('banned', !w);
-            }
+            refreshWeaponBtn();
             if (typeof restartShooting === 'function') restartShooting();
             saveWeapons();
         }
@@ -3900,7 +3995,7 @@ sound    音效文件    note   备注</pre>
             gameScene.classList.remove('show');
             hallContainer.classList.add('show');
             // 结算返回大厅：这一局彻底结束，连接与房间一起清掉
-            if (peer) { try { peer.destroy(); } catch (e) {} peer = null; }
+            if (typeof mmStop === 'function') mmStop(false);
             peerConns = [];
             NET.ready = false;
             NET.room  = '';
@@ -3964,6 +4059,7 @@ sound    音效文件    note   备注</pre>
         let BULLET_SPEED = 12;      // 改成 let：开发者模式可调
         const SHOOT_COOLDOWN = 200; // 连发间隔
         let shootInterval = null; // 连发定时器
+        let slowFirstTimer = null; // 慢速武器第一发的瞄准延迟
         let mousePos = { x: 0, y: 0 };
         let mouseAimReady = false;   // 电脑端鼠标是否已在场景里移动过（用来判断有没有鼠标瞄准）
 
@@ -4079,12 +4175,22 @@ sound    音效文件    note   备注</pre>
         // 主脚本走到这里说明按钮都绑好了，末尾的兜底脚本就不会再重复绑定
         window.__uiBound = true;
 
+        // 匹配失败/超时后的兜底：拉人机把局补满，不让用户干等
+        function fallbackBots(n, msg) {
+            matchingText.textContent = msg || '正在进入人机对局…';
+            if (matchingCountdown) matchingCountdown.textContent = '';
+            setTimeout(function () {
+                mmStop(true);
+                addBotPlayers(Math.max(1, n | 0));
+                enterGame();
+            }, 700);
+        }
+
         function startMatching(mode) {
             players = [{ name: playerNickname, type: 'self' }];
 
             // 开发者模式：关掉匹配，直接拉人机进局，不走倒计时
             if (typeof DEV !== 'undefined' && DEV.matchSkip) {
-                if (!DEV.skipP2P) initPeerConnection(mode);
                 addBotPlayers(Math.max(1, DEV.botCount | 0));
                 enterGame();
                 return;
@@ -4092,59 +4198,57 @@ sound    音效文件    note   备注</pre>
 
             openModal(matchingModal);
 
-            // 联机库（PeerJS）是异步加载的，国内网络常常拉不到。
-            // 拉不到就别让用户干等 15 秒倒计时了 —— 直接进人机局并说清楚原因。
-            const wantP2P = !(typeof DEV !== 'undefined' && DEV.skipP2P);
-            const canP2P  = wantP2P && typeof Peer !== 'undefined';
-            if (wantP2P && !canP2P) {
-                setNetStatus('bad', '联机库未加载，本次只能人机');
-            } else if (canP2P) {
-                initPeerConnection(mode);
+            const wantNet = !(typeof DEV !== 'undefined' && DEV.skipP2P);
+            const canNet  = wantNet && !!mmApi();
+            const seats   = (mode === '4' || mode === 'multi') ? 4 : 2;
+
+            if (wantNet && !canNet) setNetStatus('bad', '联机后端不可用，本次只能人机');
+
+            // 多人模式：自己开一间房，好友输房间码进来；其余模式交给后端自动凑人
+            if (mode === 'multi') {
+                if (!canNet) {
+                    matchingText.textContent = '多人对局需要联机后端';
+                    if (matchingCountdown) matchingCountdown.textContent = '';
+                    setTimeout(function () { closeModal(matchingModal, true); openModal(matchModal); }, 1600);
+                    return;
+                }
+                matchingText.textContent = '正在创建房间…';
+                if (matchingCountdown) matchingCountdown.textContent = '';
+                mmStart({ mode: 'multi', kind: 'host' }).then(function (ok) {
+                    if (!ok) {
+                        matchingText.textContent = '创建房间失败';
+                        setTimeout(function () { closeModal(matchingModal, true); openModal(matchModal); }, 1400);
+                        return;
+                    }
+                    matchingText.textContent = '房间已就绪，等待好友加入…';
+                    startCountdown(60, function () {
+                        if (MM.started) return;
+                        // 人没齐也开：剩下的人位由人机补上
+                        mmPost('match/start', { ticket: MM.ticket }).then(function (j) {
+                            if (!j || !j.ok) { mmStop(true); addBotPlayers(1); enterGame(); return; }
+                            MM.peers = j.peers || MM.peers;
+                            const need = Math.max(0, (j.seats || 2) - MM.peers.length);
+                            if (need > 0) addBotPlayers(need);
+                            mmBeginRoom();
+                        });
+                    });
+                });
+                return;
             }
 
-            switch(mode) {
-                case '2':
-                    if (canP2P) {
-                        matchingText.textContent = '正在搜索双人对局对手...';
-                        startCountdown(15, () => {
-                            addBotPlayers(1);
-                            enterGame();
-                        });
-                    } else {
-                        matchingText.textContent = '联机不可用，正在进入人机对局...';
-                        if (matchingCountdown) matchingCountdown.textContent = '';
-                        setTimeout(() => { addBotPlayers(1); enterGame(); }, 700);
-                    }
-                    break;
-                case '4':
-                    matchingText.textContent = '正在组建4人对局...';
-                    setTimeout(() => {
-                        addBotPlayers(3);
-                        enterGame();
-                    }, 1000);
-                    break;
-                case 'multi':
-                    if (canP2P) {
-                        matchingText.textContent = '正在搜索多人对局玩家...';
-                        startCountdown(40, () => {
-                            stopMatching();
-                            matchingText.textContent = '暂无其他玩家游玩，请稍后再试';
-                            if (matchingCountdown) matchingCountdown.textContent = '';
-                            setTimeout(() => {
-                                closeModal(matchingModal, true);
-                                openModal(matchModal);
-                            }, 1200);
-                        });
-                    } else {
-                        matchingText.textContent = '多人对局需要联机，当前联机库未加载';
-                        if (matchingCountdown) matchingCountdown.textContent = '';
-                        setTimeout(() => {
-                            closeModal(matchingModal, true);
-                            openModal(matchModal);
-                        }, 1600);
-                    }
-                    break;
-            }
+            // 双人 / 四人：后端自动配对 —— 谁在搜就进同一间房，凑满即开
+            if (!canNet) { fallbackBots(seats - 1, '联机不可用，正在进入人机对局…'); return; }
+
+            matchingText.textContent = seats === 4 ? '正在搜索4人对局玩家…' : '正在搜索双人对局对手…';
+            mmStart({ mode: mode, kind: 'seek' }).then(function (ok) {
+                if (!ok) { fallbackBots(seats - 1, '联机后端不可用，正在进入人机对局…'); return; }
+                startCountdown(45, function () {
+                    if (MM.started) return;
+                    mmStop(true);
+                    addBotPlayers(seats - 1);
+                    enterGame();
+                });
+            });
         }
 
         let peerConns = [];      // 已建立的联机连接
@@ -4248,149 +4352,303 @@ sound    音效文件    note   备注</pre>
             });
         }
 
-        // 创建 Peer。errCb 用于 ID 冲突时换后缀重试
-        function createPeer(peerId, onReady, errCb) {
-            try {
-                peer = new Peer(peerId, { debug: 1 });
-            } catch (e) {
-                if (errCb) errCb(e);
-                return;
-            }
-            NET.closed = false;
+        // ============================================================
+        // 自建联机层：配对走自己的后端，对局数据优先 WebRTC 直连，连不上才走服务器转发
+        // 为什么不再用第三方信令服务器：公共服务器限流严重，搜索一快就"不响应"，
+        // 而且国内经常连不上，点了开始匹配毫无反馈。现在只剩一个依赖 —— 你自己的站点。
+        // ============================================================
+        const MM = {
+            on: false, room: '', seat: -1, ticket: '', mode: '2', kind: 'seek',
+            peers: [], seats: 2, pollT: null, relayT: null, after: 0,
+            pc: null, dc: null, p2p: false, relay: false, started: false,
+            outbox: [], conn: null, waitT: null
+        };
+        const MM_POLL   = 1500;   // 配对轮询间隔
+        const MM_SIG    = 800;    // 直连握手期间拉信令的间隔
+        const MM_RELAY  = 130;    // 中转模式收发间隔（只有直连失败才用）
+        const MM_P2P_TO = 11000;  // 直连握手超时，超时转中转
 
-            peer.on('open', (id) => {
-                NET.ready = true;
-                NET.myId = id;
-                NET.retry = 0;
-                NET.lastSeen = performance.now();
-                if (onReady) onReady(id);
-            });
-
-            // 有人连进来（房主侧）
-            // 名字直接从对方发来的状态里取，不再靠 ID 切分
-            // （旧代码用 split('_')[1]，昵称里带下划线就会取错）
-            peer.on('connection', (conn) => {
-                const slot = { name: '对手' };
-                conn.on('data', (d) => {
-                    if (d && typeof d.n === 'string' && d.n) slot.name = d.n;
-                    onConnData(conn, d);
-                });
-                conn.on('open', () => {
-                    if (peerConns.indexOf(conn) < 0) peerConns.push(conn);
-                    NET.lastSeen = performance.now();
-                    setNetStatus('ok', '已连接：' + slot.name);
-                    if (!players.some(p => p.type === 'online')) {
-                        players.push({ name: slot.name, type: 'online' });
-                    }
-                    clearTimeout(matchTimer);
-                    clearInterval(countdownTimer);
-                    try { conn.send({ n: playerNickname, hello: 1 }); } catch (e) {}
-                    enterGame();
-                });
-                conn.on('close', () => {
-                    peerConns = peerConns.filter(c => c !== conn);
-                    setNetStatus('warn', '对方已断开');
-                });
-            });
-
-            peer.on('disconnected', () => {
-                // 与信令服务器断开但 ID 还在，尝试重连而不是直接销毁
-                NET.ready = false;
-                setNetStatus('warn', '重连中…');
-                try { peer.reconnect(); } catch (e) {}
-            });
-
-            peer.on('error', (err) => {
-                const t = err && err.type;
-                if (t === 'unavailable-id' && NET.retry < 3) {
-                    // 房间码被占用（或自己重复开房），换随机后缀重开
-                    NET.retry++;
-                    try { peer.destroy(); } catch (e) {}
-                    createPeer(peerId + '-' + Math.random().toString(36).slice(2, 6), onReady, errCb);
-                    return;
-                }
-                if (t === 'peer-unavailable') {
-                    setNetStatus('bad', '房间不存在或房主已退出');
-                    if (errCb) errCb(err);
-                    return;
-                }
-                if (t === 'network' || t === 'server-error' || t === 'socket-error') {
-                    setNetStatus('bad', '网络异常，无法连接服务器');
-                } else if (t !== 'browser-incompatible') {
-                    console.warn('P2P异常:', err);
-                }
-                if (errCb && t !== 'peer-unavailable') errCb(err);
-            });
+        // 用你自己的站点做配对服务器：跟账号后端同源，不需要填任何地址
+        function mmApi() {
+            try { return (typeof authGetApi === 'function') ? (authGetApi() || '') : ''; } catch (e) { return ''; }
+        }
+        function mmPost(path, body) {
+            const api = mmApi();
+            if (!api) return Promise.resolve(null);
+            return fetch(api.replace(/\/+$/, '') + '/api/' + path, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body || {}), cache: 'no-store'
+            }).then(function (r) { return r.json(); }).catch(function () { return null; });
+        }
+        function mmGet(path) {
+            const api = mmApi();
+            if (!api) return Promise.resolve(null);
+            return fetch(api.replace(/\/+$/, '') + '/api/' + path +
+                (path.indexOf('?') < 0 ? '?' : '&') + '_=' + Date.now(), { cache: 'no-store' })
+                .then(function (r) { return r.json(); }).catch(function () { return null; });
         }
 
-        // 房主：开一个房间，ID 由房间码推导，好友凭码连进来
+        function mmPeerName() {
+            for (const p of MM.peers) if (p.seat !== MM.seat && p.name) return p.name;
+            return '对手';
+        }
+
+        // 连接对象：塞进 peerConns，下游的状态广播 / 心跳 / 断线检测一行都不用改
+        function mmMakeConn() {
+            return {
+                __mm: true,
+                send: function (o) {
+                    if (MM.p2p && MM.dc && MM.dc.readyState === 'open') {
+                        try { MM.dc.send(JSON.stringify(o)); } catch (e) {}
+                    } else if (MM.relay) {
+                        if (MM.outbox.length < 30) MM.outbox.push({ type: 'state', data: JSON.stringify(o) });
+                    }
+                },
+                close: function () { mmStop(false); }
+            };
+        }
+
+        function mmStop(quiet) {
+            MM.on = false; MM.started = false; MM.p2p = false; MM.relay = false;
+            if (MM.pollT)  { clearInterval(MM.pollT);  MM.pollT = null; }
+            if (MM.relayT) { clearInterval(MM.relayT); MM.relayT = null; }
+            if (MM.waitT)  { clearTimeout(MM.waitT);   MM.waitT = null; }
+            if (MM.dc) { try { MM.dc.close(); } catch (e) {} MM.dc = null; }
+            if (MM.pc) { try { MM.pc.close(); } catch (e) {} MM.pc = null; }
+            MM.outbox.length = 0;
+            peerConns = [];
+            const t = MM.ticket; MM.ticket = '';
+            if (t && !quiet) mmPost('match/leave', { ticket: t });
+        }
+
+        function mmEnter() {
+            if (MM.started) return;
+            MM.started = true;
+            clearTimeout(matchTimer);
+            clearInterval(countdownTimer);
+            // 房间里坐着几个人就建几个真人对手（自动匹配通常是 2 人）
+            (MM.peers || []).forEach(function (p) {
+                if (p.seat === MM.seat) return;
+                const nm = p.name || ('玩家' + p.seat);
+                if (!players.some(x => x.type === 'online' && x.name === nm)) {
+                    players.push({ name: nm, type: 'online' });
+                }
+            });
+            if (!players.some(p => p.type === 'online')) {
+                players.push({ name: mmPeerName(), type: 'online' });
+            }
+            NET.lastSeen = performance.now();
+            if (!peerConns.length && MM.conn) peerConns.push(MM.conn);
+            enterGame();
+        }
+
+        // ---------- 信令收发 ----------
+        function mmSigPost(type, data) {
+            return mmPost('rtc/signal', { room: MM.room, seat: MM.seat, type: type, data: data, after: MM.after });
+        }
+        function mmHandle(m) {
+            if (!m) return;
+            if (typeof m.id === 'number' && m.id > MM.after) MM.after = m.id;
+            if (m.type === 'offer' || m.type === 'answer') mmOnSdp(m.type, m.data);
+            else if (m.type === 'ice') {
+                try { const c = JSON.parse(m.data); if (MM.pc) MM.pc.addIceCandidate(c).catch(function () {}); } catch (e) {}
+            } else if (m.type === 'state') {
+                try { onConnData(MM.conn, JSON.parse(m.data)); } catch (e) {}
+            }
+        }
+        function mmDrain(j) {
+            if (!j || !j.ok || !Array.isArray(j.in)) return;
+            for (const m of j.in) mmHandle(m);
+        }
+
+        const MM_ICE = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
+
+        function mmEnsurePc() {
+            if (MM.pc) return MM.pc;
+            let pc = null;
+            try { pc = new RTCPeerConnection({ iceServers: MM_ICE }); } catch (e) { return null; }
+            MM.pc = pc;
+            pc.onicecandidate = function (e) {
+                if (e.candidate) mmSigPost('ice', JSON.stringify(e.candidate.toJSON ? e.candidate.toJSON() : e.candidate));
+            };
+            pc.onconnectionstatechange = function () {
+                if (pc.connectionState === 'failed' && MM.on && !MM.p2p) mmStartRelay();
+            };
+            pc.ondatachannel = function (e) { mmWireDc(e.channel); };
+            return pc;
+        }
+
+        function mmWireDc(dc) {
+            MM.dc = dc;
+            dc.onopen = function () {
+                MM.p2p = true; MM.relay = false;
+                if (MM.waitT)  { clearTimeout(MM.waitT);  MM.waitT = null; }
+                if (MM.relayT) { clearInterval(MM.relayT); MM.relayT = null; }
+                if (MM.relay)  { /* 之前走中转时攒的包丢掉，直连后重新自报家门 */ }
+                MM.outbox.length = 0;
+                setNetStatus('ok', '已直连：' + mmPeerName());
+                if (!peerConns.length && MM.conn) peerConns.push(MM.conn);
+                try { dc.send(JSON.stringify({ n: playerNickname, hello: 1 })); } catch (e) {}
+                mmEnter();
+            };
+            dc.onmessage = function (e) {
+                try { onConnData(MM.conn, JSON.parse(e.data)); } catch (err) {}
+            };
+            dc.onclose = function () {
+                MM.p2p = false;
+                if (MM.on && MM.started) mmStartRelay();
+            };
+        }
+
+        async function mmStartP2P() {
+            const pc = mmEnsurePc();
+            if (!pc) { mmStartRelay(); return; }
+            try { mmWireDc(pc.createDataChannel('game', { ordered: true })); } catch (e) {}
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                await mmSigPost('offer', JSON.stringify(pc.localDescription));
+            } catch (e) { mmStartRelay(); }
+        }
+
+        async function mmOnSdp(type, data) {
+            const pc = mmEnsurePc();
+            if (!pc) return;
+            try {
+                const desc = JSON.parse(data);
+                // 双方同时发起会撞车（glare）：座位大的让一步，不回应这份 offer
+                if (type === 'offer' && pc.signalingState !== 'stable' && MM.seat > 0) return;
+                await pc.setRemoteDescription(new RTCSessionDescription(desc));
+                if (type === 'offer') {
+                    const ans = await pc.createAnswer();
+                    await pc.setLocalDescription(ans);
+                    await mmSigPost('answer', JSON.stringify(pc.localDescription));
+                }
+            } catch (e) {}
+        }
+
+        // ---------- 中转兜底：直连失败时所有对局数据经服务器转发 ----------
+        function mmStartRelay(reason) {
+            if (!MM.on) return;
+            if (MM.relay) return;
+            MM.relay = true; MM.p2p = false;
+            if (MM.relayT) clearInterval(MM.relayT);
+            if (!peerConns.length && MM.conn) peerConns.push(MM.conn);
+            MM.outbox.push({ type: 'state', data: JSON.stringify({ n: playerNickname, hello: 1 }) });
+            MM.relayT = setInterval(mmRelayTick, MM_RELAY);
+            setNetStatus('warn', reason || '直连失败，已转服务器转发');
+            mmEnter();
+        }
+        function mmRelayTick() {
+            if (!MM.on || !MM.relay) return;
+            const out = MM.outbox.splice(0);
+            mmPost('rtc/signal', { room: MM.room, seat: MM.seat, out: out, after: MM.after }).then(mmDrain);
+        }
+
+        // ---------- 入口 ----------
+        async function mmStart(opts) {
+            const mode = opts.mode || '2';
+            const kind = opts.kind || 'seek';
+            if (!mmApi()) { setNetStatus('bad', '没有可用的联机后端'); return false; }
+            mmStop(true);
+            MM.on = true; MM.mode = mode; MM.kind = kind; MM.started = false;
+            MM.conn = mmMakeConn();
+            const j = await mmPost('match/join', { mode: mode, kind: kind, room: opts.room || '', name: playerNickname || '玩家' });
+            if (!j || !j.ok) {
+                MM.on = false;
+                setNetStatus('bad', (j && j.error) || '联机后端不可用');
+                return false;
+            }
+            MM.ticket = j.ticket; MM.room = j.room; MM.seat = j.seat;
+            MM.seats = j.seats || 2; MM.peers = j.peers || []; MM.after = 0;
+            NET.room = j.room;
+            if (kind === 'host') showRoomPanel(String(j.room).replace(/^H/, ''));
+            if (j.state === 'ready') { mmBeginRoom(); return true; }
+            MM.pollT = setInterval(mmPoll, MM_POLL);
+            return true;
+        }
+
+        async function mmPoll() {
+            if (!MM.on || !MM.ticket) return;
+            const j = await mmGet('match/poll?ticket=' + encodeURIComponent(MM.ticket));
+            if (!j || !j.ok) {
+                if (j && j.gone) { mmStop(true); setNetStatus('bad', '匹配已结束'); }
+                return;
+            }
+            MM.peers = j.peers || [];
+            MM.seats = j.seats || MM.seats;
+            if (j.state === 'ready') {
+                if (MM.pollT) { clearInterval(MM.pollT); MM.pollT = null; }
+                mmBeginRoom();
+            } else {
+                setNetStatus('warn', '等待对手… ' + j.joined + '/' + j.seats);
+            }
+        }
+
+        function mmBeginRoom() {
+            if (!MM.on || MM.started) return;
+            setNetStatus('warn', '正在建立连接…');
+            MM.conn = MM.conn || mmMakeConn();
+            // 只有 1v1 才试直连；人多了走中转（全互联太重，且对 NAT 要求高）
+            const who = (MM.peers || []).length;
+            let canRtc = false;
+            try { canRtc = typeof RTCPeerConnection !== 'undefined'; } catch (e) { canRtc = false; }
+            if (who === 2 && canRtc) {
+                if (MM.waitT) clearTimeout(MM.waitT);
+                MM.waitT = setTimeout(function () { if (MM.on && !MM.p2p) mmStartRelay(); }, MM_P2P_TO);
+                mmGet('rtc/signal?room=' + encodeURIComponent(MM.room) + '&seat=' + MM.seat + '&after=0')
+                    .then(function (j) {
+                        mmDrain(j);
+                        if (MM.on && MM.seat === 0 && !MM.p2p) mmStartP2P();
+                    });
+                if (MM.relayT) clearInterval(MM.relayT);
+                MM.relayT = setInterval(function () {
+                    if (!MM.on) return;
+                    if (MM.p2p || MM.relay) { clearInterval(MM.relayT); MM.relayT = null; return; }
+                    mmGet('rtc/signal?room=' + encodeURIComponent(MM.room) + '&seat=' + MM.seat + '&after=' + MM.after)
+                        .then(mmDrain);
+                }, MM_SIG);
+            } else {
+                mmStartRelay(who > 2 ? '多人对局，走服务器转发' : '直连不可用，走服务器转发');
+            }
+        }
+
+        // 房主等人：自动搜索由后端凑人，房主房要自己决定什么时候开
         function initPeerConnection(mode) {
             if (typeof DEV !== 'undefined' && DEV.skipP2P) return;
-            // PeerJS 没加载出来（CDN 被墙 / 超时）：不要静默失败，
-            // 否则用户点了"开始匹配"什么反馈都没有，看着就像按钮坏了
-            if (typeof Peer === 'undefined') {
-                setNetStatus('bad', '联机库未加载，无法创建房间');
-                return;
-            }
-            NET.isHost = true;
-            NET.room = NET.room || makeRoomCode();
-            showRoomPanel(NET.room);
-            setNetStatus('warn', '正在创建房间…');
-            createPeer(roomToPeerId(NET.room), () => {
-                setNetStatus('warn', '房间已就绪，等待好友加入…');
-            }, (err) => {
-                // 以前这里没传错误回调：PeerJS 不可用时 new Peer 直接抛错，
-                // 被 catch 掉后什么也不做 —— 用户点了开始匹配完全没反应
-                setNetStatus('bad', '创建房间失败：' +
-                    ((err && (err.type || err.message)) || '未知错误'));
+            if (!mmApi()) { setNetStatus('bad', '没有联机后端，无法创建房间'); return; }
+            mmStart({ mode: mode || 'multi', kind: 'host' }).then(function (ok) {
+                if (!ok) setNetStatus('bad', '创建房间失败');
             });
         }
 
-        // 加入者：拿房间码去连房主
+        // 加入者：拿房间码去坐房主房间里的空位
         function joinRoom(code, mode) {
-            if (typeof Peer === 'undefined') {
-                // 联机库没加载出来：直接说清楚，别让按钮看起来像坏了
-                setNetStatus('bad', '联机库未加载，无法加入房间');
+            if (!mmApi()) {
+                setNetStatus('bad', '没有联机后端，无法加入房间');
                 openModal(matchingModal);
-                matchingText.textContent = '联机库未加载，无法加入房间';
-                setTimeout(() => {
-                    closeModal(matchingModal, true);
-                    openModal(joinModal);
-                }, 1400);
+                matchingText.textContent = '没有联机后端，无法加入房间';
+                setTimeout(function () { closeModal(matchingModal, true); openModal(joinModal); }, 1400);
                 return;
             }
             NET.isHost = false;
             NET.room = String(code).toUpperCase();
             setNetStatus('warn', '正在连接房间…');
             openModal(matchingModal);
-            matchingText.textContent = `正在加入房间 ${NET.room}…`;
-            matchingCountdown.textContent = '等待房主接受…';
+            matchingText.textContent = '正在加入房间 ' + NET.room + '…';
+            if (matchingCountdown) matchingCountdown.textContent = '等待房主开始…';
             showRoomPanel(NET.room);
-
-            const selfId = roomToPeerId(NET.room, '-c' + Math.random().toString(36).slice(2, 7));
-            createPeer(selfId, () => {
-                setNetStatus('warn', '正在呼叫房主…');
-                setTimeout(() => {
-                    if (!peerConns.length) {
-                        setNetStatus('bad', '连接超时，请确认房间码与房主在线');
-                    }
-                }, 12000);
-                try {
-                    const conn = peer.connect(roomToPeerId(NET.room), { reliable: true });
-                    wireConn(conn, '房主');
-                } catch (e) {
-                    setNetStatus('bad', '发起连接失败');
+            mmStart({ mode: mode || 'multi', kind: 'guest', room: 'H' + NET.room }).then(function (ok) {
+                if (!ok) {
+                    matchingText.textContent = '加入失败';
+                    setTimeout(function () { closeModal(matchingModal, true); openModal(joinModal); }, 1400);
+                    return;
                 }
-            }, () => {
-                // peer-unavailable：房间不存在
-                matchingText.textContent = '加入失败';
-                setTimeout(() => {
-                    closeModal(matchingModal);
-                    openModal(joinModal);
-                }, 1200);
+                startCountdown(45, function () {
+                    if (!MM.started) { mmStop(true); setNetStatus('bad', '房主未开始，已取消'); }
+                });
             });
         }
-
         // 广播自己的状态（血量 / 位置 / 朝向）
         function broadcastState() {
             if (!peerConns.length) {
@@ -4490,10 +4748,9 @@ sound    音效文件    note   备注</pre>
             clearInterval(countdownTimer);
             closeModal(matchingModal);
             stopShooting(); // 停止射击
-            // 进游戏时要留着 Peer 继续同步血量/位置，只有主动取消匹配才销毁
-            if (!keepPeer && peer) {
-                try { peer.destroy(); } catch (e) {}
-                peer = null;
+            // 进游戏时要留着连接继续同步血量/位置，只有主动取消匹配才断开
+            if (!keepPeer) {
+                if (typeof mmStop === 'function') mmStop(false);
                 peerConns = [];
                 NET.ready = false;
                 NET.room  = '';
@@ -4519,6 +4776,7 @@ sound    音效文件    note   备注</pre>
             selfHp = MAX_HP;
             gamePlayer.style.opacity = '1';
             closeModal(resultModal);
+            refillAmmo();          // 每局开局把手雷这类消耗品补满
 
             // 构建世界（地面尺寸、障碍物、边界墙）
             buildWorld();
@@ -4755,6 +5013,11 @@ sound    音效文件    note   备注</pre>
                 var ne = new Error('云端后端连不上'); ne.network = true; throw ne;
             }
             if (!j.ok) throw new Error(j.error || '操作失败');   // 真·业务错误，不降级
+            // 云端会话存储没就绪时后端会返回 ok 但拿不到 token。
+            // 这时如果假装成功，刷新后就是"登录凭空消失"，所以直接降级本机账号。
+            if (!j.token) {
+                var ne2 = new Error('云端会话存储未就绪，已改用本机账号'); ne2.network = true; throw ne2;
+            }
             AUTH.user  = (j.user && j.user.gameName) || j.gameName || u;
             AUTH.token = j.token || '';
             AUTH.mode  = 'remote';
@@ -4764,23 +5027,30 @@ sound    音效文件    note   备注</pre>
             closeModal(elAuthModal);
         }
 
-        // 会话恢复时向云端核对：token 还有效吗？顺带拿回最新战绩
+        // 会话恢复时向云端核对：token 还有效吗？顺带拿回最新战绩。
+        //
+        // 关键：只有后端明确回 401（token 真的失效）才登出。
+        // 之前不看状态码，只要 ok:false 就清空登录——于是后端任何一次抖动、
+        // 建表慢、503 存储未就绪，都会把用户强制踢下线，表现就是"没法保持登录"。
         async function authFetchRemoteStats() {
             var api = authGetApi();
             if (!api || !AUTH.token) return;
             try {
                 var r = await fetch(api.replace(/\/+$/, '') + '/api/game/stats?token=' + encodeURIComponent(AUTH.token));
+                if (r.status === 401) {
+                    // 明确的"登录已过期"，才退回未登录，别显示一个假在线
+                    AUTH.user = null; AUTH.token = ''; AUTH.stats = authNormStats(null);
+                    authPersist(); authRefreshUI();
+                    return;
+                }
                 var j = await r.json();
                 if (j && j.ok) {
                     AUTH.stats = authNormStats(j.stats);
                     if (j.gameName) AUTH.user = j.gameName;
                     authPersist();
-                } else {
-                    // token 失效就退回未登录，别显示一个假在线
-                    AUTH.user = null; AUTH.token = ''; AUTH.stats = authNormStats(null);
-                    authPersist();
                 }
-            } catch (e) { /* 网络问题不打断 */ }
+                // 5xx / 服务暂不可用：保持登录，只是这次不同步战绩
+            } catch (e) { /* 网络问题不打断，也不登出 */ }
             authRefreshUI();
         }
 
@@ -5169,19 +5439,45 @@ sound    音效文件    note   备注</pre>
                 case keyConfig.left: keys.left = false; break;
                 case keyConfig.right: keys.right = false; break;
                 case keyConfig.jump: keys.jump = false; break;
-                case 'KeyJ': stopShooting(); break;
+                case 'KeyJ': flushSlowShot(); stopShooting(); break;
             }
         });
 
         // ========== 鼠标控制（瞄准+按住连发） ==========
-        gameScene.addEventListener('mousemove', (e) => {
+        // 只认真正的鼠标移动。
+        // 触屏上点任何按钮，浏览器都会补发一次坐标乱来的 mousemove，
+        // 一旦被当成鼠标瞄准，没拖动时的默认方向就会永远指向那个残留点——
+        // 表现就是"火箭筒只能朝某一个固定角度发射"（射速慢的枪尤其明显，
+        // 因为按住也来不及等下一发修正）。
+        function isRealMouse(e) {
+            if (!e) return false;
+            if (e.pointerType) return e.pointerType === 'mouse' || e.pointerType === 'pen';
+            if (e.sourceCapabilities) return !e.sourceCapabilities.firesTouchEvents;
+            return true;   // 老浏览器拿不到类型信息时，按鼠标处理（桌面端为主）
+        }
+        // 触屏上手指抬起后浏览器会补发一次合成 mousemove，坐标是手指最后落点，
+        // isRealMouse 在新内核上能挡掉，老内核（部分平板 WebView）挡不住，
+        // 所以再加一道时间闸：刚碰过屏 600ms 内的 mousemove 一律不认。
+        let lastTouchTs = 0;
+        const markTouch = () => { lastTouchTs = performance.now(); };
+        document.addEventListener('touchstart', markTouch, { passive: true });
+        document.addEventListener('touchmove',  markTouch, { passive: true });
+        document.addEventListener('pointerdown', (e) => {
+            if (!e.pointerType || e.pointerType === 'touch') markTouch();
+        }, { passive: true });
+
+        const applyMouseAim = (e) => {
             if (!gameRunning) return;
-            // 鼠标是屏幕坐标，世界坐标 = 相机偏移 + 瞄准镜缩放的逆变换
+            if (performance.now() - lastTouchTs < 600) return;   // 合成事件，忽略
+            // 屏幕坐标 → 世界坐标：world 被相机平移过、开镜时还被缩放过，
+            // 直接用它变换后的实际包围盒反算最准（rect 已含 transform-origin 的影响）：
+            //   屏幕X = rect.left + 世界X * 缩放   ⇒   世界X = (屏幕X - rect.left) / 缩放
+            // 老写法拿玩家的世界坐标当屏幕原点去减，缩放时误差会被放大，
+            // 慢速武器（火箭筒）每次开火都用这个坐标，就变成永远朝同一个怪方向打。
             const zNow = currentWorldScale();   // 实际缩放值（开镜时 < 1）
-            const ox = playerPhysics.x + PLAYER_SIZE / 2;
-            const oy = playerPhysics.y + PLAYER_SIZE;
-            mousePos.x = ox + (e.clientX - ox + camera.x) / zNow;
-            mousePos.y = oy + (e.clientY - oy) / zNow;
+            const wr = world.getBoundingClientRect();
+            mousePos.x = (e.clientX - wr.left) / zNow;
+            mousePos.y = (e.clientY - wr.top) / zNow;
             mouseAimReady = true;
             
             // 根据鼠标位置更新角色朝向
@@ -5193,6 +5489,11 @@ sound    音效文件    note   备注</pre>
                 playerPhysics.facing = 1;
                 gamePlayer.classList.remove('flip');
             }
+        };
+        // 触屏点按钮补发的 mousemove 一律忽略，只认真实鼠标/手写笔
+        gameScene.addEventListener('mousemove', (e) => { if (isRealMouse(e)) applyMouseAim(e); });
+        gameScene.addEventListener('pointermove', (e) => {
+            if (e.pointerType === 'mouse' || e.pointerType === 'pen') applyMouseAim(e);
         });
 
         // 鼠标按下场景空白处开始连发。
@@ -5464,6 +5765,7 @@ sound    音效文件    note   备注</pre>
         // ---- 瞄准辅助 HUD：射程终点圆圈 / 霰弹扇形（画在 world 里，自动跟相机）----
         const aimHud = (function () {
             let mark = null, coneA = null, coneB = null, ready = false;
+            let svg = null, polyline = null;   // 抛物线轨迹
             function ensure() {
                 if (ready) return;
                 const w = document.getElementById('world');
@@ -5482,6 +5784,18 @@ sound    音效文件    note   备注</pre>
                                       'display:none;z-index:60;will-change:transform;';
                 });
                 w.appendChild(mark); w.appendChild(coneA); w.appendChild(coneB);
+                // SVG 只当画布用：尺寸给 1px 再 overflow:visible，坐标直接用世界坐标
+                svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.setAttribute('width', '1'); svg.setAttribute('height', '1');
+                svg.style.cssText = 'position:absolute;left:0;top:0;width:1px;height:1px;' +
+                                    'overflow:visible;pointer-events:none;z-index:60;display:none;';
+                polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+                polyline.setAttribute('fill', 'none');
+                polyline.setAttribute('stroke', 'rgba(150,255,160,.75)');
+                polyline.setAttribute('stroke-width', '3');
+                polyline.setAttribute('stroke-dasharray', '9 9');
+                svg.appendChild(polyline);
+                w.appendChild(svg);
                 ready = true;
             }
             return {
@@ -5517,9 +5831,39 @@ sound    音效文件    note   备注</pre>
                         e.style.background = t >= 0.999 ? 'rgba(255,120,60,.95)' : 'rgba(255,170,80,.7)';
                     });
                 },
+                // 抛物线预览：温雷时画出手雷会走的那条弧线，松手前就能看出落点
+                // 用 SVG polyline 画，一条线搞定，不用几十个 div
+                drawArc(ox, oy, ax, ay, speed, gravity, ratioLeft) {
+                    ensure(); if (!polyline) return;
+                    const dx = ax - ox, dy = ay - oy, d = Math.sqrt(dx * dx + dy * dy) || 1;
+                    let vx = dx / d * speed, vy = dy / d * speed;
+                    let px = ox, py = oy;
+                    const pts = [ox + ',' + oy];
+                    const gy = (typeof groundTop !== 'undefined' ? groundTop : 1e9);
+                    for (let i = 0; i < 160; i++) {
+                        vy += gravity; px += vx; py += vy;
+                        if (i % 2 === 0) pts.push(px.toFixed(1) + ',' + py.toFixed(1));
+                        if (py >= gy - 4 || px < -50 || px > 4200) break;
+                    }
+                    svg.style.display = 'block';
+                    polyline.setAttribute('points', pts.join(' '));
+                    // 快炸了就把线变红，提醒你赶紧扔出去
+                    polyline.setAttribute('stroke',
+                        ratioLeft <= 0.25 ? 'rgba(255,90,70,.95)' : 'rgba(150,255,160,.75)');
+                    // 落点画个圈，顺带表示爆炸大概覆盖多大范围
+                    const w = (typeof curWeapon === 'function') ? curWeapon() : null;
+                    const blast = (w && w.grenade && w.grenade.blast) || 210;
+                    mark.style.display = 'block';
+                    mark.style.left = (px - blast / 2) + 'px';
+                    mark.style.top  = (py - blast / 2) + 'px';
+                    mark.style.width = blast + 'px';
+                    mark.style.height = blast + 'px';
+                    mark.style.borderColor = 'rgba(150,255,160,.7)';
+                },
                 clear() {
                     if (mark) mark.style.display = 'none';
                     if (coneA) { coneA.style.display = 'none'; coneB.style.display = 'none'; }
+                    if (svg) { svg.style.display = 'none'; }
                 }
             };
         })();
@@ -5558,6 +5902,7 @@ sound    音效文件    note   备注</pre>
                 shoot(t.x, t.y, ov);
             }
 
+            flushSlowShot();          // 抬手太快时补发那一发慢速武器
             shootingActive = false;
             aimVec = null;
             aimingScope = false;
@@ -5631,9 +5976,24 @@ sound    音效文件    note   备注</pre>
         function startShooting(getTargetFunc) {
             if (shootInterval) return; // 防止重复启动
             shootTargetFn = getTargetFunc;
-            // 立即发射第一发
-            const target = getTargetFunc();
-            shoot(target.x, target.y);
+            // 射速慢的武器（火箭筒这类 cd 上千米秒的）先给 150ms 瞄准窗口：
+            // 手指按下后总要拖一下才定方向，如果按下瞬间就打出去，
+            // 这一发永远是"朝向水平"，等于白扔一发。
+            // 快枪保持按下即响，不能有延迟感。
+            const slow = currentFireCd() >= 600;
+            if (slow && slowFirstTimer) { clearTimeout(slowFirstTimer); slowFirstTimer = null; }
+            if (slow) {
+                slowFirstTimer = setTimeout(() => {
+                    slowFirstTimer = null;
+                    if (!shootInterval) return;      // 期间已经松手就别打了
+                    const t = getTargetFunc();
+                    shoot(t.x, t.y);
+                }, 150);
+            } else {
+                // 立即发射第一发
+                const target = getTargetFunc();
+                shoot(target.x, target.y);
+            }
             // 启动定时连发
             shootInterval = setInterval(() => {
                 const t = getTargetFunc();
@@ -5650,11 +6010,109 @@ sound    音效文件    note   备注</pre>
             startShooting(shootTargetFn);
         }
 
+        // 慢速武器：手指抬得快（<150ms）时那一发还没打出去，这里补上，
+        // 否则"点一下火箭筒"会变成毫无反应
+        function flushSlowShot() {
+            if (!slowFirstTimer) return;
+            clearTimeout(slowFirstTimer);
+            slowFirstTimer = null;
+            const t = (typeof shootTargetFn === 'function' && shootTargetFn) ? shootTargetFn() : currentAimTarget();
+            shoot(t.x, t.y);
+        }
+
         function stopShooting() {
             if (shootInterval) {
                 clearInterval(shootInterval);
                 shootInterval = null;
             }
+            if (slowFirstTimer) { clearTimeout(slowFirstTimer); slowFirstTimer = null; }
+        }
+
+        // ========== 消耗品弹药 ==========
+        // ammo > 0 的武器是消耗品（手雷），打一发少一发；没写 ammo 的枪械是无限的
+        function ammoLeft(w) {
+            if (!w || !w.ammo) return Infinity;
+            if (w._ammo == null) w._ammo = w.ammo;   // 首次用到按满弹算
+            return w._ammo;
+        }
+        function consumeAmmo(w) {
+            if (!w || !w.ammo) return true;
+            if (ammoLeft(w) <= 0) return false;
+            w._ammo--;
+            refreshWeaponBtn();
+            return true;
+        }
+        function refillAmmo() {
+            weapons.forEach(w => { if (w && w.ammo) w._ammo = w.ammo; });
+            refreshWeaponBtn();
+        }
+        // 引擎里的手雷行为要查弹药、要在手里炸开，从 window 上取
+        window.ammoLeft = ammoLeft;
+        window.consumeAmmo = consumeAmmo;
+
+        // 切枪按钮上的文字：消耗品顺便显示还剩几个
+        function refreshWeaponBtn() {
+            const w = (typeof curWeapon === 'function') ? curWeapon() : null;
+            const btn = document.getElementById('weaponBtn');
+            if (!btn) return;
+            if (!w) { btn.textContent = '无'; btn.classList.add('banned'); return; }
+            btn.classList.remove('banned');
+            const left = ammoLeft(w);
+            btn.textContent = (left === Infinity)
+                ? w.name.slice(0, 3)
+                : (w.name.slice(0, 3) + '\n' + Math.max(0, left));
+            btn.style.whiteSpace = 'pre-line';
+            btn.style.lineHeight = '1.05';
+            // 打光了就明确标出来，别让人一直按
+            btn.classList.toggle('banned', left !== Infinity && left <= 0);
+        }
+
+        // ========== 爆炸 ==========
+        // 中心满伤，边缘衰减到约 40%；范围内所有单位都吃伤害，包括自己
+        function spawnExplosion(x, y, r) {
+            const el = document.createElement('div');
+            el.className = 'explosion';
+            el.style.left = (x - r / 2) + 'px';
+            el.style.top  = (y - r / 2) + 'px';
+            el.style.width = r + 'px';
+            el.style.height = r + 'px';
+            world.appendChild(el);
+            setTimeout(() => el.remove(), 520);
+        }
+
+        function doExplode(x, y, radius, dmg) {
+            spawnExplosion(x, y, radius);
+            const hurt = (tx, ty, fn) => {
+                const dx = tx - x, dy = ty - y;
+                const d = Math.sqrt(dx * dx + dy * dy);
+                if (d > radius) return;
+                fn(Math.round(dmg * (1 - (d / radius) * 0.6)));
+            };
+            fighters.forEach(f => {
+                if (!f || f.dead) return;
+                hurt(f.x + PLAYER_SIZE / 2, f.y + PLAYER_SIZE / 2, d => damageFighter(f, d));
+            });
+            // 自己站的太近也会被炸到：温雷温过头就是这个下场
+            hurt(playerPhysics.x + PLAYER_SIZE / 2, playerPhysics.y + PLAYER_SIZE / 2,
+                 d => damageSelf(d));
+        }
+
+        // 一直按着不松手，雷在手里炸开
+        function cookExplode(w, cfg) {
+            const px = playerPhysics.x + PLAYER_SIZE / 2;
+            const py = playerPhysics.y + PLAYER_SIZE / 2;
+            doExplode(px, py, cfg.blast, cfg.blastDmg);
+            consumeAmmo(w);
+            if (typeof aimHud !== 'undefined' && aimHud) aimHud.clear();
+        }
+        window.cookExplode = cookExplode;
+
+        // hpFloor：火箭筒这类武器命中后把目标压到只剩一口气，而不是直接打死
+        // 已经比这个值还低时就正常收掉，不会出现"打不死"
+        function hitFighter(f, dmg, hpFloor) {
+            if (!f || f.dead || gameOver) return;
+            if (hpFloor > 0 && f.hp > hpFloor) { damageFighter(f, f.hp - hpFloor); return; }
+            damageFighter(f, dmg != null ? dmg : 0);
         }
 
         // ========== 射击函数（玩家）==========
@@ -5663,6 +6121,11 @@ sound    音效文件    note   备注</pre>
         function shoot(targetX, targetY, override) {
             const w = (typeof curWeapon === 'function') ? curWeapon() : null;
             const ov = override || {};
+            // 消耗品：没弹药就直接停火，不做无用功
+            if (w && w.ammo && ammoLeft(w) <= 0) {
+                stopShooting();
+                return;
+            }
             const ox = playerPhysics.x + PLAYER_SIZE / 2;
             const oy = playerPhysics.y + PLAYER_SIZE / 2;
             const pellets = (ov.pellets != null) ? ov.pellets : (w ? (w.pellets || 1) : 1);
@@ -5684,8 +6147,20 @@ sound    音效文件    note   备注</pre>
                 const bopts = { dmg: w ? w.dmg : undefined, speed: w ? w.speed : undefined };
                 if (ov.range  != null) bopts.range  = ov.range;
                 if (ov.pierce != null) bopts.pierce = ov.pierce;
+                // 普通连发时没有 override，武器自带的 pierce 也要生效，
+                // 否则火箭筒写了"穿透4层"实际一层都穿不过，撞上箱子就没了
+                else if (w && w.pierce != null) bopts.pierce = w.pierce;
+                // 火箭筒：命中后把人打残到指定血量而不是打死
+                if (w && w.hpFloor > 0) bopts.hpFloor = w.hpFloor;
+                // 投掷物：抛物线 + 落地滚动 + 定时引爆
+                if (ov.throwable) {
+                    ['throwable','fuse','gravity','bounce','friction','rollDecay','blast','blastDmg']
+                        .forEach(k => { if (ov[k] != null) bopts[k] = ov[k]; });
+                }
                 spawnBullet(ox, oy, tx, ty, null, bopts);
             }
+            // 扣弹药：一次射击算一发（霰弹一次打 8 颗也只算一发）
+            if (w) consumeAmmo(w);
         }
 
         // ========== 通用子弹生成：玩家 / 人机 / 联机对手共用 ==========
@@ -5702,14 +6177,18 @@ sound    音效文件    note   备注</pre>
 
             const dmg = (opts && opts.dmg != null) ? opts.dmg : BULLET_DAMAGE;
             let spd   = (opts && opts.speed != null) ? opts.speed : BULLET_SPEED;
-            // 开发者模式里手动调过子弹速度就优先用它（方便调试），访问包 try 防止变量还没初始化
+            // 只有在开发者模式里手动调过子弹速度才覆盖（默认值不算"调过"），
+            // 否则武器 JSON 里写的 speed（火箭筒 9、维克托 18）会被一律抹成 12
             try {
-                if (owner === null && typeof DEV !== 'undefined' && DEV && DEV.bulletSpeed) spd = BULLET_SPEED;
+                const defSpd = (typeof DEV_DEFAULT !== 'undefined' && DEV_DEFAULT.bulletSpeed) || 12;
+                if (owner === null && typeof DEV !== 'undefined' && DEV &&
+                    DEV.bulletSpeed && DEV.bulletSpeed !== defSpd) spd = BULLET_SPEED;
             } catch (e) {}
 
             // 创建子弹DOM（挂到 world 里，才能跟着相机一起移动）
             const bulletEl = document.createElement('div');
-            bulletEl.className = 'bullet' + (owner ? ' enemy' : '');
+            bulletEl.className = 'bullet' + (owner ? ' enemy' : '') +
+                                 ((opts && opts.throwable) ? ' grenade' : '');
             // 玩家子弹用当前武器的配色，换枪后弹道颜色立刻跟着变
             if (owner === null) {
                 const bw = (typeof curWeapon === 'function') ? curWeapon() : null;
@@ -5742,7 +6221,20 @@ sound    音效文件    note   备注</pre>
                 dmg: dmg,
                 range:  (opts && opts.range  != null) ? opts.range  : null,  // 有效射程
                 pierce: (opts && opts.pierce != null) ? opts.pierce : 0,    // 可穿透层数
-                owner: owner || null
+                owner: owner || null,
+                // ---- 投掷物专用 ----
+                throwable: !!(opts && opts.throwable),
+                gravity:  (opts && opts.gravity  != null) ? opts.gravity  : 0,   // 抛物线重力
+                bounce:   (opts && opts.bounce   != null) ? opts.bounce   : 0,   // 落地反弹
+                friction: (opts && opts.friction != null) ? opts.friction : 0.86,// 撞击摩擦（每次弹一下乘一次）
+                rollDecay:(opts && opts.rollDecay!= null) ? opts.rollDecay: 0.985,// 贴地滚动的每帧衰减
+                fuse:     (opts && opts.fuse     != null) ? opts.fuse     : null,// 引信剩余毫秒
+                fuseEnd:  (opts && opts.fuse     != null)
+                              ? (performance.now() + opts.fuse) : null,          // 到期时刻
+                blast:    (opts && opts.blast    != null) ? opts.blast    : 0,   // 爆炸半径
+                blastDmg: (opts && opts.blastDmg != null) ? opts.blastDmg : 0,   // 爆炸伤害
+                hpFloor:  (opts && opts.hpFloor  != null) ? opts.hpFloor  : 0,   // 打残不死
+                onGround: false
             });
         }
 
@@ -5860,13 +6352,15 @@ sound    音效文件    note   备注</pre>
             el.classList.add('hidden');
         }
 
-        // 任意菜单/面板打开时暂停物理与 AI：符合"开菜单即暂停"的直觉，
-        // 也让低配设备上滑动列表时不再被主循环抢掉算力
+        // 只有"真正的模态弹窗"才暂停物理与 AI。
+        // 开发者面板是悬浮窗，设计目的就是边玩边调参看效果，绝不能算进来——
+        // 之前它在这里，导致一开面板玩家和人机同时被冻住（表现为锁在某处动不了）。
         function uiPaused() {
             return !!document.querySelector(
-                '.dev-panel.dev-open, .weapon-modal:not(.hidden), ' +
+                '.weapon-modal:not(.hidden), ' +
                 '.settings-modal:not(.hidden), .result-modal.show, ' +
-                '.matching-modal:not(.hidden)'
+                '.matching-modal:not(.hidden), .auth-modal:not(.hidden), ' +
+                '.tip-modal:not(.hidden)'
             );
         }
 
@@ -6019,12 +6513,40 @@ sound    音效文件    note   备注</pre>
             // ===== 更新子弹（世界坐标）=====
             for (let i = bullets.length - 1; i >= 0; i--) {
                 const b = bullets[i];
+                const prevX = b.x, prevY = b.y;   // 位移前的位置：判定"从哪一面撞上来的"
+                // 投掷物：先吃重力再位移，才有抛物线；贴地时靠摩擦慢慢滚停
+                if (b.throwable && b.gravity) {
+                    if (b.onGround) {
+                        // 还在不在支撑物上？滚出台面/箱子边缘就该继续往下掉
+                        const onG = b.y >= groundTop - 5;
+                        const onO = obstacles.some(o =>
+                            rectsOverlap(b.x - 7, b.y + 2, 14, 8, o.x, o.y, o.w, o.h));
+                        if (!onG && !onO) b.onGround = false;
+                    }
+                    if (b.onGround) {
+                        b.vy = 0;
+                        // 滚动摩擦要很轻：按每帧 0.985 衰减，扔出去能一路滚出去
+                        // （以前直接拿撞击摩擦 0.86 每帧乘一次，十来帧就停死，看着像"根本不滚"）
+                        b.vx *= Math.pow(b.rollDecay || 0.985, frameScale);
+                        if (Math.abs(b.vx) < 0.12) b.vx = 0;
+                    } else {
+                        b.vy += b.gravity * frameScale;
+                    }
+                }
                 b.x += b.vx * frameScale;
                 b.y += b.vy * frameScale;
                 b.el.style.left = (b.x - 10) + 'px';
                 b.el.style.top = (b.y - 3) + 'px';
 
                 let dead = false;
+
+                // 引信：按真实时间算，不受帧率影响（掉帧时不会提前或延后炸）
+                if (b.fuseEnd != null) {
+                    if (performance.now() >= b.fuseEnd) {
+                        doExplode(b.x, b.y, b.blast || 200, b.blastDmg || 100);
+                        dead = true;
+                    }
+                }
 
                 // 撞地面：这就是原来"子弹穿透地面"的原因，以前只判断了屏幕边界
                 // 开发者模式开了穿透就跳过这些销毁判定
@@ -6033,10 +6555,24 @@ sound    音效文件    note   备注</pre>
 
                     // 撞地面：带穿透的子弹可以钻过去，但同一层只穿一次
                     if (b.y >= groundTop - 3 && !b.hitObjs.has('ground')) {
-                        b.hitObjs.add('ground');
-                        spawnImpact(b.x, groundTop);
-                        if (b.pierce > 0) b.pierce--;
-                        else dead = true;
+                        // 投掷物不销毁：弹一下继续滚
+                        if (b.throwable && b.bounce > 0) {
+                            // 已经躺稳了就别再重复触发弹跳：
+                            // 以前每帧都进来一次，vx 每帧多乘一遍摩擦，落地就立刻停死
+                            if (!b.onGround) {
+                                b.y = groundTop - 3;
+                                b.vy = -Math.abs(b.vy) * b.bounce;
+                                // 落地只掉一点点横向速度：0.86 那种撞击摩擦一落地就把速度砍没，
+                                // 手雷"啪"一下贴地不动，看着就是根本不滚
+                                b.vx *= 0.97;
+                                if (Math.abs(b.vy) < 1.2) { b.vy = 0; b.onGround = true; }
+                            }
+                        } else {
+                            b.hitObjs.add('ground');
+                            spawnImpact(b.x, groundTop);
+                            if (b.pierce > 0) b.pierce--;
+                            else dead = true;
+                        }
                     }
 
                     // 撞障碍物或墙
@@ -6044,6 +6580,30 @@ sound    音效文件    note   备注</pre>
                         for (const o of obstacles) {
                             if (b.hitObjs.has(o)) continue;
                             if (rectsOverlap(b.x - 10, b.y - 3, 20, 6, o.x, o.y, o.w, o.h)) {
+                                // 投掷物撞箱子：按撞的是哪一面来反弹，不销毁
+                                // 以前用一个全局 __bounced 标记，第一次撞过之后
+                                // 再碰到任何箱子就直接消失——"碰到障碍瞬间消失"就是这么来的
+                                if (b.throwable && b.bounce > 0) {
+                                    // 用撞进来之前的位置判断是哪一面，比只看重叠深度可靠：
+                                    // 落在箱子边缘时才不会被误判成撞侧面弹回去
+                                    if (prevY + 3 <= o.y + 1) {
+                                        // 从上方落到箱顶：可以停在箱子上，也能继续滚下去
+                                        b.y = o.y - 3;
+                                        if (b.vy > 1.2) { b.vy = -b.vy * b.bounce; b.vx *= 0.97; }
+                                        else { b.vy = 0; b.onGround = true; }
+                                    } else if (prevY - 3 >= o.y + o.h - 1) {
+                                        // 从下往上顶到箱底
+                                        b.y = o.y + o.h + 3;
+                                        b.vy = Math.abs(b.vy) * b.bounce;
+                                    } else {
+                                        // 撞侧面：横向弹开，不销毁
+                                        b.x = (prevX <= o.x) ? (o.x - 10) : (o.x + o.w + 10);
+                                        b.vx = -b.vx * b.bounce;
+                                        b.vy *= 0.97;
+                                    }
+                                    spawnImpact(b.x, b.y);
+                                    break;
+                                }
                                 b.hitObjs.add(o);
                                 spawnImpact(b.x, b.y);
                                 if (b.pierce > 0) b.pierce--;   // 穿甲：穿过去继续飞
@@ -6064,13 +6624,14 @@ sound    音效文件    note   备注</pre>
                 }
 
                 // 命中单位：玩家的子弹打人机/对手，反之打玩家
-                if (!dead && !gameOver) {
+                // 投掷物不走这条：手雷是滚过去的，伤害靠爆炸结算
+                if (!dead && !gameOver && !b.throwable) {
                     if (b.owner === null) {
                         for (const f of fighters) {
                             if (f.dead) continue;
                             if (rectsOverlap(b.x - 10, b.y - 3, 20, 6, f.x, f.y, PLAYER_SIZE, PLAYER_SIZE)) {
                                 spawnImpact(b.x, b.y);
-                                damageFighter(f, b.dmg != null ? b.dmg : BULLET_DAMAGE);
+                                hitFighter(f, b.dmg != null ? b.dmg : BULLET_DAMAGE, b.hpFloor);
                                 dead = true;
                                 break;
                             }
@@ -6344,7 +6905,8 @@ sound    音效文件    note   备注</pre>
             btns.className = 'dev-btns';
             [
                 ['重建世界', () => { if (gameRunning) buildWorld(); devShowToast('世界已重建'); }],
-                ['清空子弹', () => { bullets.forEach(b => b.el.remove()); bullets = []; }]
+                ['清空子弹', () => { bullets.forEach(b => b.el.remove()); bullets = []; }],
+                ['补满弹药', () => { refillAmmo(); }]
             ].forEach(([txt, fn]) => {
                 const b = document.createElement('button');
                 b.className = 'dev-btn';
@@ -6954,6 +7516,11 @@ sound    音效文件    note   备注</pre>
                     name: '自定义霰弹', dmg: 12, cd: 700, speed: 11, spread: 18, pellets: 8,
                     zoom: 1, color: '#ff9944', behavior: 'choke_shotgun', fireMode: 'release',
                     choke: { chokeMs: 1200, spreadFrom: 20, spreadTo: 5 }
+                }, {
+                    name: '自定义手雷', dmg: 120, cd: 700, speed: 14, zoom: 1,
+                    color: '#8fa86a', ammo: 3, behavior: 'grenade', fireMode: 'release',
+                    grenade: { fuseMs: 5000, minFuse: 400, gravity: 0.55, bounce: 0.42,
+                               friction: 0.86, blast: 210, blastDmg: 120 }
                 }]
             };
             const blob = new Blob([JSON.stringify(tpl, null, 2)], { type: 'application/json' });

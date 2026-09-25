@@ -168,6 +168,40 @@ games INTEGER DEFAULT 0,
 updated_at INTEGER DEFAULT 0
 )`,
   `CREATE INDEX IF NOT EXISTS idx_game_rank ON game_stats(kills DESC)`,
+  // ---- 联机配对 ----
+  // 房间：自动匹配的房间 kind='auto'，房主开的房间 kind='host'（凭房间码加入）
+  `CREATE TABLE IF NOT EXISTS match_rooms (
+id TEXT PRIMARY KEY,
+kind TEXT DEFAULT 'auto',
+mode TEXT DEFAULT '2',
+seats INTEGER DEFAULT 2,
+joined INTEGER DEFAULT 0,
+state TEXT DEFAULT 'forming',
+created_at INTEGER DEFAULT 0
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_rooms_find ON match_rooms(mode, kind, state, created_at)`,
+  // 座位：一个房间一行一座，靠主键天然防超卖
+  `CREATE TABLE IF NOT EXISTS match_seats (
+room TEXT NOT NULL,
+seat INTEGER NOT NULL,
+ticket TEXT NOT NULL,
+name TEXT DEFAULT '',
+state TEXT DEFAULT 'wait',
+beat INTEGER DEFAULT 0,
+created_at INTEGER DEFAULT 0,
+PRIMARY KEY (room, seat)
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_seats_beat ON match_seats(beat)`,
+  // 信令与中继共用一张表：offer/answer/ice/对局状态都走这里
+  `CREATE TABLE IF NOT EXISTS match_signal (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+room TEXT NOT NULL,
+seat INTEGER DEFAULT -1,
+type TEXT DEFAULT '',
+data TEXT DEFAULT '',
+ts INTEGER DEFAULT 0
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_signal_room ON match_signal(room, id)`,
 ];
 // 旧库升级：你之前已经部署过一版，表里没有库存/上限/数量这三列。
 // SQLite 的 ALTER TABLE ADD COLUMN 会重复报错，所以先查 PRAGMA 再决定加不加。
@@ -917,6 +951,24 @@ export async function onRequest(context) {
       }
 
       // ---- 射击游戏：查自己的战绩 ----
+      if (path === 'match/poll') {
+        return json(await apiMatchPoll(env, {
+          ticket: url.searchParams.get('ticket') || ''
+        }));
+      }
+
+      if (path === 'rtc/signal') {
+        // 只读模式：不推送，只拉。前端首次握手前用它建基线
+        const room = url.searchParams.get('room') || '';
+        const seat = Number(url.searchParams.get('seat'));
+        const after = Number(url.searchParams.get('after')) || 0;
+        if (!room || !Number.isFinite(seat)) return json({ ok: false, error: '参数不完整' });
+        const rows = await dbAll(env,
+          'SELECT id, seat, type, data FROM match_signal WHERE room=? AND seat<>? AND id>? ORDER BY id LIMIT 60',
+          [room, seat, after]);
+        return json({ ok: true, in: rows, last: rows.length ? rows[rows.length - 1].id : after });
+      }
+
       if (path === 'game/stats') {
         const token = url.searchParams.get('token') || '';
         const u = await getUserById(env, await userTokenToId(env, token));
@@ -1042,6 +1094,12 @@ export async function onRequest(context) {
         const stats = await gameAddResult(env, u.id, u.game_name, win, body.kills);
         return json({ ok: true, gameName: u.game_name, stats });
       }
+
+      // ---- 联机配对 ----
+      if (path === 'match/join')  return json(await apiMatchJoin(env, body));
+      if (path === 'match/leave') return json(await apiMatchLeave(env, body));
+      if (path === 'match/start') return json(await apiMatchStart(env, body));
+      if (path === 'rtc/signal')  return json(await apiSignal(env, body));
 
       // ================= 团队 =================
       if (path === 'user/team') {
@@ -1778,6 +1836,198 @@ export async function onRequest(context) {
   } catch (e) {
     return json({ ok: false, error: safeError(e) }, 500);
   }
+}
+
+// ==================== 联机配对（自建，不依赖第三方信令服务器）====================
+// 思路：匹配只做一件事 —— 把「同模式、正在等」的玩家塞进同一个房间的空座位。
+// 房间满了就开打；真正对局数据要么 WebRTC 直连，要么走这里中继，绝不走第三方。
+const MATCH_MODES = { '2': 2, '4': 4, multi: 4 };
+const SEAT_TTL    = 45000;        // 心跳超时：超时视为掉线，腾出座位
+const ROOM_TTL    = 10 * 60 * 1000;
+const SIGNAL_TTL  = 7 * 60 * 1000;
+const CODE_CHARS  = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉易混淆的 O/0/I/1
+
+function matchRand(n) {
+  let s = '';
+  for (let i = 0; i < n; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  return s;
+}
+function matchMode(m)  { const s = String(m); return MATCH_MODES[s] ? s : '2'; }
+function matchSeats(m) { return MATCH_MODES[matchMode(m)] || 2; }
+function cleanName(n) {
+  const s = String(n == null ? '' : n).replace(/[\r\n\t]/g, ' ').trim().slice(0, 16);
+  return s || '玩家';
+}
+
+// 回收超时座位与空房间。只在 join 时跑，不在每次轮询跑（省读次数）
+async function matchSweep(env, now) {
+  try {
+    const dead = await dbAll(env, 'SELECT room, seat FROM match_seats WHERE beat > 0 AND beat < ?', [now - SEAT_TTL]);
+    for (const d of dead) {
+      await dbRun(env, 'DELETE FROM match_seats WHERE room = ? AND seat = ?', [d.room, d.seat]);
+    }
+    if (dead.length) {
+      await dbRun(env, 'UPDATE match_rooms SET joined = (SELECT COUNT(*) FROM match_seats s WHERE s.room = match_rooms.id)');
+      await dbRun(env, 'UPDATE match_rooms SET state = ? WHERE state = ? AND joined < seats', ['forming', 'ready']);
+      await dbRun(env, 'DELETE FROM match_rooms WHERE id NOT IN (SELECT DISTINCT room FROM match_seats)');
+    }
+    await dbRun(env, 'DELETE FROM match_rooms WHERE state = ? AND created_at < ?', ['forming', now - ROOM_TTL]);
+    await dbRun(env, 'DELETE FROM match_signal WHERE ts < ?', [now - SIGNAL_TTL]);
+  } catch (e) { /* 清理失败不影响主流程 */ }
+}
+
+// 抢座：主键冲突即已被占，换下一个。天然防超卖，无需事务
+async function matchClaimSeat(env, roomId, seats, ticket, name, now) {
+  for (let s = 0; s < seats; s++) {
+    const r = await dbRun(env,
+      `INSERT OR IGNORE INTO match_seats (room,seat,ticket,name,state,beat,created_at) VALUES (?,?,?,?,'wait',?,?)`,
+      [roomId, s, ticket, name, now, now]);
+    if (r && r.changes === 1) {
+      await dbRun(env, 'UPDATE match_rooms SET joined = (SELECT COUNT(*) FROM match_seats WHERE room = ?) WHERE id = ?', [roomId, roomId]);
+      return s;
+    }
+  }
+  return -1;
+}
+
+async function matchRoomSeats(env, roomId) {
+  const r = await dbGet(env, 'SELECT seats FROM match_rooms WHERE id = ?', [roomId]);
+  return (r && r.seats) || 2;
+}
+
+async function matchFill(env, roomId, now) {
+  const room = await dbGet(env, 'SELECT seats, kind FROM match_rooms WHERE id = ?', [roomId]);
+  const seats = (room && room.seats) || 2;
+  // 房主房只要凑到 2 人就能开（剩下位置由前端补人机），
+  // 自动匹配的房间则要坐满才开，免得开局就缺人
+  const need = (room && room.kind === 'host') ? Math.min(2, seats) : seats;
+  const c = await dbGet(env, 'SELECT COUNT(*) AS c FROM match_seats WHERE room = ?', [roomId]);
+  if (c && c.c >= need) {
+    await dbRun(env, `UPDATE match_rooms SET state='ready' WHERE id=?`, [roomId]);
+    await dbRun(env, `UPDATE match_seats SET state='paired' WHERE room=?`, [roomId]);
+    return true;
+  }
+  return false;
+}
+
+async function matchRoomInfo(env, roomId) {
+  const room = await dbGet(env, 'SELECT * FROM match_rooms WHERE id = ?', [roomId]);
+  if (!room) return null;
+  const seats = await dbAll(env, 'SELECT seat, name FROM match_seats WHERE room = ? ORDER BY seat', [roomId]);
+  return {
+    room: room.id, kind: room.kind, mode: room.mode, seats: room.seats,
+    joined: seats.length, state: room.state,
+    peers: seats.map(s => ({ seat: s.seat, name: s.name }))
+  };
+}
+
+async function apiMatchJoin(env, body) {
+  const now = Date.now();
+  await matchSweep(env, now);
+  const mode  = matchMode(body.mode);
+  const seats = matchSeats(mode);
+  const kind  = (body.kind === 'host' || body.kind === 'guest') ? body.kind : 'seek';
+  const name  = cleanName(body.name);
+  const ticket = 'T' + matchRand(12);
+  let roomId = null, seat = -1;
+
+  if (kind === 'host') {
+    roomId = 'H' + matchRand(6);
+    await dbRun(env, `INSERT INTO match_rooms (id,kind,mode,seats,joined,state,created_at) VALUES (?,'host',?,?,0,'forming',?)`,
+      [roomId, mode, seats, now]);
+  } else if (kind === 'guest') {
+    roomId = String(body.room || '').trim().toUpperCase();
+    if (!/^H[A-Z2-9]{6}$/.test(roomId)) return { ok: false, error: '房间码格式不对' };
+    const r = await dbGet(env, `SELECT state FROM match_rooms WHERE id=? AND kind='host'`, [roomId]);
+    if (!r) return { ok: false, error: '房间不存在或房主已退出' };
+    if (r.state !== 'forming') return { ok: false, error: '这个房间已经开始了' };
+  } else {
+    // 自动匹配：找同模式、还没满的自动房间；没有就自己开一间，等下一个人进来
+    const rows = await dbAll(env,
+      `SELECT id, seats FROM match_rooms WHERE mode=? AND kind='auto' AND state='forming' AND joined < seats ORDER BY created_at LIMIT 5`,
+      [mode]);
+    for (const r of rows) {
+      const s = await matchClaimSeat(env, r.id, r.seats, ticket, name, now);
+      if (s >= 0) { roomId = r.id; seat = s; break; }
+    }
+    if (roomId === null) {
+      roomId = 'A' + matchRand(10);
+      await dbRun(env, `INSERT INTO match_rooms (id,kind,mode,seats,joined,state,created_at) VALUES (?,'auto',?,?,0,'forming',?)`,
+        [roomId, mode, seats, now]);
+      seat = await matchClaimSeat(env, roomId, seats, ticket, name, now);
+    }
+  }
+
+  if (kind === 'host' || kind === 'guest') {
+    seat = await matchClaimSeat(env, roomId, await matchRoomSeats(env, roomId), ticket, name, now);
+    if (seat < 0) return { ok: false, error: '房间已满' };
+  }
+  if (seat < 0) return { ok: false, error: '暂时无法加入，请重试' };
+
+  // 房主房要等人齐才 ready；自动房和加入者进来时都可能刚好凑满
+  if (kind !== 'host') await matchFill(env, roomId, now);
+  const info = await matchRoomInfo(env, roomId);
+  if (!info) return { ok: false, error: '房间已解散' };
+  return { ok: true, ticket, seat, ...info };
+}
+
+async function apiMatchPoll(env, q) {
+  const ticket = String(q.ticket || '');
+  if (!ticket) return { ok: false, error: '缺少凭据' };
+  const now = Date.now();
+  const me = await dbGet(env, 'SELECT room, seat FROM match_seats WHERE ticket=?', [ticket]);
+  if (!me) return { ok: false, gone: true, error: '匹配已结束' };
+  await dbRun(env, 'UPDATE match_seats SET beat=? WHERE ticket=?', [now, ticket]);
+  const info = await matchRoomInfo(env, me.room);
+  if (!info) return { ok: false, gone: true, error: '房间已解散' };
+  return { ok: true, seat: me.seat, ...info };
+}
+
+// 房主等不及了：人没齐也强制开始，缺的位置由前端补人机
+async function apiMatchStart(env, body) {
+  const ticket = String(body.ticket || '');
+  const me = ticket ? await dbGet(env, 'SELECT room FROM match_seats WHERE ticket=?', [ticket]) : null;
+  if (!me) return { ok: false, error: '你不在房间里' };
+  await dbRun(env, `UPDATE match_rooms SET state='ready' WHERE id=?`, [me.room]);
+  await dbRun(env, `UPDATE match_seats SET state='paired' WHERE room=?`, [me.room]);
+  const info = await matchRoomInfo(env, me.room);
+  if (!info) return { ok: false, error: '房间已解散' };
+  return { ok: true, ...info };
+}
+
+async function apiMatchLeave(env, body) {
+  const ticket = String(body.ticket || '');
+  const me = ticket ? await dbGet(env, 'SELECT room, seat FROM match_seats WHERE ticket=?', [ticket]) : null;
+  if (me) {
+    await dbRun(env, 'DELETE FROM match_seats WHERE room=? AND seat=?', [me.room, me.seat]);
+    await dbRun(env, 'UPDATE match_rooms SET joined = (SELECT COUNT(*) FROM match_seats WHERE room = ?) WHERE id = ?', [me.room, me.room]);
+    await dbRun(env, `UPDATE match_rooms SET state='forming' WHERE id=? AND state='ready'`, [me.room]);
+    await dbRun(env, 'DELETE FROM match_rooms WHERE id NOT IN (SELECT DISTINCT room FROM match_seats)');
+  }
+  return { ok: true };
+}
+
+// 收发合一：一次请求既推送自己的信令/状态，又拉回别人的。省一半请求数
+async function apiSignal(env, body) {
+  const room = String(body.room || '');
+  const seat = Number(body.seat);
+  if (!room) return { ok: false, error: '缺少房间' };
+  if (!Number.isFinite(seat)) return { ok: false, error: '缺少座位' };
+  const now = Date.now();
+
+  const one = (t, d) => dbRun(env,
+    'INSERT INTO match_signal (room,seat,type,data,ts) VALUES (?,?,?,?,?)',
+    [room, seat, String(t || 'state').slice(0, 16), String(d == null ? '' : d).slice(0, 4000), now]);
+
+  if (body.type) await one(body.type, body.data);
+  const out = Array.isArray(body.out) ? body.out.slice(0, 40) : [];
+  for (const m of out) { if (m) await one(m.type, m.data); }
+
+  const after = Number(body.after) || 0;
+  const rows = await dbAll(env,
+    'SELECT id, seat, type, data FROM match_signal WHERE room=? AND seat<>? AND id>? ORDER BY id LIMIT 60',
+    [room, seat, after]);
+  return { ok: true, in: rows, last: rows.length ? rows[rows.length - 1].id : after };
 }
 
 // ================= Pages Advanced Mode（_worker.js 入口）=================
